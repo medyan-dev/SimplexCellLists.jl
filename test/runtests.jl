@@ -1,6 +1,4 @@
-using MultiShapeCellLists
-using Test
+using SafeTestsets
 
-@testset "MultiShapeCellLists.jl" begin
-    # Write your tests here.
-end
+@safetestset "test min distances" begin include("test_mindistance.jl") end
+
