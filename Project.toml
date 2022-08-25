@@ -3,5 +3,8 @@ uuid = "fbe69cd6-f244-4ce4-a90b-8979d86c9ea4"
 authors = ["Nathan Zimmerberg"]
 version = "0.1.0"
 
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+
 [compat]
 julia = "1.7"

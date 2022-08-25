@@ -1,12 +1,19 @@
 # Test min distance functions
 
 using JuMP
-using HiGHS
 using StaticArrays
 using LinearAlgebra
+using MultiShapeCellLists
+using Random
+using Test
+using Clarabel
 
-function refDist(points1,points2)
-    model = Model(HiGHS.Optimizer)
+
+function refDist2(points1,points2)
+    model = Model(Clarabel.Optimizer)
+    set_optimizer_attribute(model, "tol_gap_rel", 1E-12)
+    set_optimizer_attribute(model, "tol_gap_abs", 0.0)
+    set_silent(model)
     n1 = length(points1)
     n2 = length(points2)
     dims = length(points1[1])
@@ -20,11 +27,34 @@ function refDist(points1,points2)
     @expression(model, d[i = 1:dims], pt1[i]-pt2[i])
     @objective(model, Min, sum(d[i]*d[i] for i in 1:dims))
     optimize!(model)
-    sqrt(objective_value(model))
+    objective_value(model)
 end
 
+Random.seed!(1234)
 
 @testset "point to point" begin
-    # Write your tests here.
-    @test 
+    N = 1000
+    a = rand(SVector{1,SVector{3,Float64}},N)
+    b = rand(SVector{1,SVector{3,Float64}},N)
+    for i in 1:N
+        @test refDist2(a[i],b[i]) ≈ MultiShapeCellLists.dist2PointPoint(a[i],b[i])
+    end
+end
+
+@testset "point to line" begin
+    N = 1000
+    a = rand(SVector{1,SVector{3,Float64}},N)
+    b = rand(SVector{2,SVector{3,Float64}},N)
+    for i in 1:N
+        @test refDist2(a[i],b[i]) ≈ MultiShapeCellLists.dist2PointLine(a[i],b[i])
+    end
+end
+
+@testset "line to line" begin
+    N = 1000
+    a = rand(SVector{2,SVector{3,Float64}},N)
+    b = rand(SVector{2,SVector{3,Float64}},N)
+    for i in 1:N
+        @test refDist2(a[i],b[i]) ≈ MultiShapeCellLists.dist2LineLine(a[i],b[i])
+    end
 end
