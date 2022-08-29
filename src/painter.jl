@@ -13,10 +13,10 @@ struct Painter
     inv_voxel_length::Float32
 
     "Max ranges of each group"
-    maxrange::SVector{2, Vector{Float32}}
+    max_range::SVector{2, Vector{Float32}}
 
     "indexed by shape id then (groupid,x,y,z) then element id"
-    grid::SVector{2, Array{Vector{Tuple{Int32, Float32}}, 4}}
+    grids::SVector{2, Array{Vector{Tuple{Int32, Float32}}, 4}}
 
     data::Tuple{Vector{Vector{Point}}, Vector{Vector{Line}}}
 
@@ -29,7 +29,7 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer ;
         grid_start::SVector{3,AbstractFloat},
         grid_size::SVector{3,Integer},
         voxel_length::AbstractFloat,
-        maxrange::SVector{2, Vector{AbstractFloat}},
+        max_range::SVector{2, Vector{AbstractFloat}},
     )
     pointgrid = [Tuple{Int32, Float32}[] for i in 1:numpointgroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
     linegrid = [Tuple{Int32, Float32}[] for i in 1:numlinegroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
@@ -38,7 +38,7 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer ;
         grid_size,
         voxel_length,
         inv(voxel_length),
-        maxrange,
+        max_range,
         SA[pointgrid, linegrid],
         ([Point[] for i in 1:numpointgroups], [Line[] for i in 1:numlinegroups]),
         ([Bool[] for i in 1:numpointgroups],  [Bool[] for i in 1:numlinegroups]),
@@ -62,21 +62,36 @@ function setElements(m::Painter, points, lines)
             groupexists .= true
         end
     end
+    for (groupid, in_group) in enumerate(m.data[1])
+        max_range = m.max_range[1][groupid]
+        for (i, element) in enumerate(in_group)
+            paintElement(m, groupid, i, element, max_range)
+        end
+    end
+    for (groupid, in_group) in enumerate(m.data[2])
+        max_range = m.max_range[2][groupid]
+        for (i, element) in enumerate(in_group)
+            paintElement(m, groupid, i, element, max_range)
+        end
+    end
+
 end
 
 """
 add a point, return the point id.
 """
-function addElement(m::Painter, groupid::Integer, element::Element{N}) where {N} ::Int64
+function addElement(m::Painter, groupid::Integer, element::Simplex{N}) where {N} ::Int64
     group = push!(m.data[N][groupid],element)
     push!(m.exists[N][groupid], true)
-    return length(group)
+    i = length(group)
+    paintElement(m, groupid, i, element, m.max_range[N][groupid])
+    return i
 end
 
 """
 delete an element, the other element ids are stable.
 """
-function deleteElement(m::Painter, groupid::Integer, elementid::Integer, elementtype::Type{Element{N}}) where {N} ::Nothing
+function deleteElement(m::Painter, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}}) where {N} ::Nothing
     m.exists[N][groupid][elementid] = false
     return
 end
