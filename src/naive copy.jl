@@ -2,28 +2,27 @@
 
 using StaticArrays
 
-const Element{N} = SVector{N, SVector{3, Float32}}
-const Point = Element{1}
-const Line = Element{2}
-
-
-distSqr(x::Point, y::Point) = dist2PointPoint(x, y)
-distSqr(x::Point, y::Line)  = dist2PointLine( x, y)
-distSqr(x::Line,  y::Point) = dist2PointLine( y, x)
-distSqr(x::Line,  y::Line)  = dist2LineLine(  x, y)
-
 struct Naive
-    data::Tuple{Vector{Vector{Point}}, Vector{Vector{Line}}}
+    "points indexed by group id then order added"
+    points::Vector{Vector{SVector{1, SVector{3, Float32}}}}
 
-    "true if element exists"
-    exists::Tuple{Vector{Vector{Bool}}, Vector{Vector{Bool}}}
+    "true if point exists"
+    pointexists::Vector{Vector{Bool}}
+
+    "lines indexed by group id then order added"
+    lines::Vector{Vector{SVector{2, SVector{3, Float32}}}}
+
+    "true if line exists"
+    lineexists::Vector{Vector{Bool}}
 end
 
 
 function Naive(numpointgroups::Integer, numlinegroups::Integer ;kw...)
     Naive(
-        ([Point[] for i in 1:numpointgroups], [Line[] for i in 1:numlinegroups]),
-        ([Bool[] for i in 1:numpointgroups],  [Bool[] for i in 1:numlinegroups]),
+        [[] for i in 1:numpointgroups],
+        [[] for i in 1:numpointgroups],
+        [[] for i in 1:numlinegroups],
+        [[] for i in 1:numlinegroups],
     )
 end
 
@@ -32,142 +31,124 @@ end
 Set the elements stored in the cell list.
 """
 function setElements(m::Naive, points, lines)
-    @argcheck length(points) == length(m.data[1])
-    @argcheck length(lines) == length(m.data[2])
-    for (n, in_data) in enumerate((points, lines,))
-        for (groupid, in_group) in enumerate(in_data)
-            group = m.data[n][groupid]
-            groupexists = m.exists[n][groupid]
-            resize!(group, length(in_group))
-            resize!(groupexists, length(in_group))
-            group .= in_group
-            groupexists .= true
-        end
+    @argcheck length(points) == length(m.points)
+    @argcheck length(lines) == length(m.lines)
+    for groupid in 1:length(points)
+        in_group = points[groupid]
+        group = m.points[groupid]
+        resize!(group, length(in_group))
+        resize!(m.pointexists[groupid], length(in_group))
+        group .= in_group
+        m.pointexists[groupid] .= true
+    end
+
+    for groupid in 1:length(lines)
+        in_group = lines[groupid]
+        group = m.lines[groupid]
+        resize!(group, length(in_group))
+        resize!(m.lineexists[groupid], length(in_group))
+        group .= in_group
+        m.lineexists[groupid] .= true
     end
 end
+
 
 """
 add a point, return the point id.
 """
-function addElement(m::Naive, groupid::Integer, element::Element{N}) where {N} ::Int64
-    group = push!(m.data[N][groupid],element)
-    push!(m.exists[N][groupid], true)
-    return length(group)
+function addPoint(m::Naive, groupid::Integer, point)::Int64
+    @argcheck length(point) == 1
+    @argcheck length(point[begin]) == 3
+    points = push!(m.points[groupid],point)
+    push!(m.pointexists[groupid], true)
+    return length(points)
 end
 
 """
-delete an element, the other element ids are stable.
+add a line, return the line id.
 """
-function deleteElement(m::Naive, groupid::Integer, elementid::Integer, elementtype::Type{Element{N}}) where {N} ::Nothing
-    m.exists[N][groupid][elementid] = false
+function addLine(m::Naive, groupid::Integer, line)::Int64
+    @argcheck length(line) == 2
+    @argcheck length(line[begin]) == 3
+    @argcheck length(line[begin+1]) == 3
+    lines = push!(m.lines[groupid],line)
+    push!(m.lineexists[groupid], true)
+    return length(lines)
+end
+
+
+"""
+delete a point, the other element ids are stable.
+"""
+function deletePoint(m::Naive, groupid::Integer, pointid::Integer)::Nothing
+    m.pointexists[groupid] = false
     return
 end
 
 """
-map a function to all elements in `groupid` in range of one element
+delete a line, the other element ids are stable.
+"""
+function deleteLine(m::Naive, groupid::Integer, lineid::Integer)::Nothing
+    m.lineexists[groupid] = false
+    return
+end
+
+"""
+map a function to all points in `groupid` in range of point
 
 The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
+Except here `x` and `y` are `SVector{1, SVector{3, Float32}}`
 
-`x` is always `element` and i is always 0.
+`x` is always `point` converted to 32 bit float and i is always 0.
 
     function f(x,y,i,j,d2,output)
         # update output
         return output
     end
 """
-function mapElementElements!(f, output, m::Naive, groupid::Integer, element::Element{N}, elementstype::Type{Element{M}}, cutoff_sqr::Float32) where {N, M}
-    x = element
-    # just loop through all element in groupid
-    group = m.data[M][groupid]
-    exists = m.exists[M][groupid]
-    for (j, y) in enumerate(group)
-        if exists[j]
-            @inline d2 = distSqr(x, y)
+function mapPointPoints!(f, output, m::Naive, groupid::Integer, point, cutoff_sqr::Float32)
+    # convert point to 32bit float form
+    x = convert(SVector{1, SVector{3, Float32}}, point)
+    # just loop through all points in groupid
+    points = m.points[groupid]
+    pointexists = m.pointexists[groupid]
+    for (j, y) in enumerate(points)
+        if pointexists[j]
+            @inline d2 = dist2PointPoint(x, y)
             if d2 ≤ cutoff_sqr
                 @inline output = f(x, y, 0, j, d2, output)
             end
         end
     end
-    return output
 end
 
 
+
 """
-map a function to all pairs of elements in the same group in range of each other.
+map a function to all line segments in `groupid` in range of point
 
 The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVector{3, Float32}}`
+Except here `x::SVector{1, SVector{3, Float32}}` and `y::SVector{2, SVector{3, Float32}}`
+
+`x` is always `point` converted to 32 bit float and i is always 0.
 
     function f(x,y,i,j,d2,output)
         # update output
         return output
     end
 """
-function mapPairElements!(f, output, m::Naive, groupid::Integer, elementstype::Type{Element{N}}, cutoff_sqr::Float32) where {N}
-    # just double loop through all element in groupid
-    group = m.data[N][groupid]
-    exists = m.exists[N][groupid]
-    n = length(group)
-    for i in 1:(n-1)
-        if exists[i]
-            x = group[i]
-            for j in (i+1):n
-                if exists[j]
-                    y = group[j]
-                    @inline d2 = distSqr(x, y)
-                    if d2 ≤ cutoff_sqr
-                        @inline output = f(x, y, i, j, d2, output)
-                    end
-                end
+function mapPointLines!(f, output, m::Naive, groupid::Integer, point, cutoff_sqr::Float32)
+    # convert point to 32bit float form
+    x = convert(SVector{1, SVector{3, Float32}}, point)
+    # just loop through all lines in groupid
+    lines = m.lines[groupid]
+    lineexists = m.lineexists[groupid]
+    for (j, y) in enumerate(lines)
+        if lineexists[j]
+            @inline d2 = dist2PointLine(x, y)
+            if d2 ≤ cutoff_sqr
+                @inline output = f(x, y, 0, j, d2, output)
             end
         end
     end
-    return output
-end
-
-
-"""
-map a function to all pairs of elements in different groups in range of each other.
-
-The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
-
-    function f(x,y,i,j,d2,output)
-        # update output
-        return output
-    end
-"""
-function mapPairElementsElements!(
-        f, 
-        output, 
-        m::Naive, 
-        x_groupid::Integer, 
-        x_elementstype::Type{Element{N}}, 
-        y_groupid::Integer, 
-        y_elementstype::Type{Element{M}}, 
-        cutoff_sqr::Float32,
-    ) where {N, M}
-    # just double loop through all element in groupid
-    x_group = m.data[N][x_groupid]
-    x_exists = m.exists[N][x_groupid]
-    y_group = m.data[M][y_groupid]
-    y_exists = m.exists[M][y_groupid]
-    xn = length(x_group)
-    yn = length(y_group)
-    for i in 1:xn
-        if x_exists[i]
-            x = x_group[i]
-            for j in 1:yn
-                if y_exists[j]
-                    y = y_group[j]
-                    @inline d2 = distSqr(x, y)
-                    if d2 ≤ cutoff_sqr
-                        @inline output = f(x, y, i, j, d2, output)
-                    end
-                end
-            end
-        end
-    end
-    return output
 end

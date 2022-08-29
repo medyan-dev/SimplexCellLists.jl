@@ -1,11 +1,23 @@
-# Naive implementation using double for loops
-
-
-
 """
-A simple `MultiShapeCellList` with no extra options that uses double for loops.
+This implementation is based on the idea in https://gitlab.com/f-nedelec/cytosim/-/blob/master/src/sim/fiber_grid.h
+And in figure 10 of "Francois Nedelec and Dietrich Foethke 2007 New J. Phys. 9 427"
+to paint a grid with elements based on a maximum range.
 """
-struct Naive <: MultiShapeCellList
+struct Painter
+    grid_start::SVector{3,Float32}
+
+    grid_size::SVector{3,Int32}
+
+    voxel_length::Float32
+
+    inv_voxel_length::Float32
+
+    "Max ranges of each group"
+    maxrange::SVector{2, Vector{Float32}}
+
+    "indexed by shape id then (groupid,x,y,z) then element id"
+    grid::SVector{2, Array{Vector{Tuple{Int32, Float32}}, 4}}
+
     data::Tuple{Vector{Vector{Point}}, Vector{Vector{Line}}}
 
     "true if element exists"
@@ -13,8 +25,21 @@ struct Naive <: MultiShapeCellList
 end
 
 
-function Naive(numpointgroups::Integer, numlinegroups::Integer)
-    Naive(
+function Painter(numpointgroups::Integer, numlinegroups::Integer ;
+        grid_start::SVector{3,AbstractFloat},
+        grid_size::SVector{3,Integer},
+        voxel_length::AbstractFloat,
+        maxrange::SVector{2, Vector{AbstractFloat}},
+    )
+    pointgrid = [Tuple{Int32, Float32}[] for i in 1:numpointgroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
+    linegrid = [Tuple{Int32, Float32}[] for i in 1:numlinegroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
+    Painter(
+        grid_start,
+        grid_size,
+        voxel_length,
+        inv(voxel_length),
+        maxrange,
+        SA[pointgrid, linegrid],
         ([Point[] for i in 1:numpointgroups], [Line[] for i in 1:numlinegroups]),
         ([Bool[] for i in 1:numpointgroups],  [Bool[] for i in 1:numlinegroups]),
     )
@@ -24,7 +49,7 @@ end
 """
 Set the elements stored in the cell list.
 """
-function setElements(m::Naive, points, lines)
+function setElements(m::Painter, points, lines)
     @argcheck length(points) == length(m.data[1])
     @argcheck length(lines) == length(m.data[2])
     for (n, in_data) in enumerate((points, lines,))
@@ -42,7 +67,7 @@ end
 """
 add a point, return the point id.
 """
-function addElement(m::Naive, groupid::Integer, element::Simplex{N}) where {N} ::Int64
+function addElement(m::Painter, groupid::Integer, element::Element{N}) where {N} ::Int64
     group = push!(m.data[N][groupid],element)
     push!(m.exists[N][groupid], true)
     return length(group)
@@ -51,13 +76,13 @@ end
 """
 delete an element, the other element ids are stable.
 """
-function deleteElement(m::Naive, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}}) where {N} ::Nothing
+function deleteElement(m::Painter, groupid::Integer, elementid::Integer, elementtype::Type{Element{N}}) where {N} ::Nothing
     m.exists[N][groupid][elementid] = false
     return
 end
 
 """
-map a function to all elements in `groupid` in range of one simplex
+map a function to all elements in `groupid` in range of one element
 
 The function f should have the same form as used in CellListMap.jl
 Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
@@ -69,7 +94,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapSimplexElements!(f, output, m::Naive, groupid::Integer, element::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff_sqr::Float32) where {N, M}
+function mapElementElements!(f, output, m::Painter, groupid::Integer, element::Element{N}, elementstype::Type{Element{M}}, cutoff_sqr::Float32) where {N, M}
     x = element
     # just loop through all element in groupid
     group = m.data[M][groupid]
@@ -97,7 +122,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVect
         return output
     end
 """
-function mapPairElements!(f, output, m::Naive, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff_sqr::Float32) where {N}
+function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype::Type{Element{N}}, cutoff_sqr::Float32) where {N}
     # just double loop through all element in groupid
     group = m.data[N][groupid]
     exists = m.exists[N][groupid]
@@ -134,11 +159,11 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
 function mapPairElementsElements!(
         f, 
         output, 
-        m::Naive, 
+        m::Painter, 
         x_groupid::Integer, 
-        x_elementstype::Type{Simplex{N}}, 
+        x_elementstype::Type{Element{N}}, 
         y_groupid::Integer, 
-        y_elementstype::Type{Simplex{M}}, 
+        y_elementstype::Type{Element{M}}, 
         cutoff_sqr::Float32,
     ) where {N, M}
     # just double loop through all element in groupid
