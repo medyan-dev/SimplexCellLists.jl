@@ -1,21 +1,23 @@
+const MAX_SAMPLE_SPACING = Float32(1//8)
+
 """
 This implementation is based on the idea in https://gitlab.com/f-nedelec/cytosim/-/blob/master/src/sim/fiber_grid.h
 And in figure 10 of "Francois Nedelec and Dietrich Foethke 2007 New J. Phys. 9 427"
 to paint a grid with elements based on a maximum range.
 """
 struct Painter
-    grid_start::SVector{3,Float32}
+    grid_start::SVector{3,Float64}
 
     grid_size::SVector{3,Int32}
 
-    voxel_length::Float32
+    voxel_length::Float64
 
-    inv_voxel_length::Float32
+    inv_voxel_length::Float64
 
     "Max ranges of each group"
-    max_range::SVector{2, Vector{Float32}}
+    max_range::SVector{2, Vector{Float64}}
 
-    "indexed by shape id then (groupid,x,y,z) then element id"
+    "indexed by shape id then (groupid,x,y,z) to get a vector of elements painted"
     grids::SVector{2, Array{Vector{Tuple{Int32, Float32}}, 4}}
 
     data::Tuple{Vector{Vector{Point}}, Vector{Vector{Line}}}
@@ -109,16 +111,42 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapElementElements!(f, output, m::Painter, groupid::Integer, element::Element{N}, elementstype::Type{Element{M}}, cutoff_sqr::Float32) where {N, M}
-    x = element
-    # just loop through all element in groupid
+function mapSimplexElements!(f, output, m::Painter, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float64;
+        i::Integer=0,
+        filterj=Returns(true),
+    ) where {N, M}
+    @argcheck cutoff ≤ m.max_range[M][groupid]
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
-    for (j, y) in enumerate(group)
-        if exists[j]
-            @inline d2 = distSqr(x, y)
-            if d2 ≤ cutoff_sqr
-                @inline output = f(x, y, 0, j, d2, output)
+    grid = grids[M]
+    voxelcutoff = Float64(1//2*√(3))*m.voxel_length + cutoff + MAX_SAMPLE_SPACING*m.voxel_length
+    voxelcutoff_sqr_f32 = Float32(voxelcutoff^2)
+    cutoff_sqr_f32 = Float32(cutoff^2)
+    # sample unique voxels that the element goes in based on sampling points that are at most 1/8 voxel_length away from any point in the element.
+    mapSampleVoxels(m, x) do voxelid, numvoxels
+        voxel = grid[groupid, voxelid...]
+        for (j, sqrdist) in voxel
+            if filterj(j)
+                if sqrdist ≤ voxelcutoff_sqr_f32
+                    # load other element
+                    if exists[j]
+                        y = group[j]
+                        @inline d2, s_min = distSqr_sMin(x, y)
+                        if d2 ≤ cutoff_sqr_f32
+                            canonical_voxelid = if numvoxels > 1
+                                # check that this voxel is the canonical one.
+                                closest_sampled_s = getClosestSampledS(s_min, norm_x)
+                                closest_sampled_norm_x_pt = closest_sampled_s ⋅ norm_x
+                                getVoxelId(closest_sampled_norm_x_pt)
+                            else
+                                voxelid
+                            end
+                            if voxelid == canonical_voxelid
+                                @inline output = f(x, y, i, j, d2, output)
+                            end
+                        end
+                    end
+                end
             end
         end
     end
@@ -137,23 +165,19 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVect
         return output
     end
 """
-function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype::Type{Element{N}}, cutoff_sqr::Float32) where {N}
+function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float64) where {N}
     # just double loop through all element in groupid
+    norm_cutoff = cutoff*m.inv_voxel_length
     group = m.data[N][groupid]
     exists = m.exists[N][groupid]
     n = length(group)
     for i in 1:(n-1)
         if exists[i]
             x = group[i]
-            for j in (i+1):n
-                if exists[j]
-                    y = group[j]
-                    @inline d2 = distSqr(x, y)
-                    if d2 ≤ cutoff_sqr
-                        @inline output = f(x, y, i, j, d2, output)
-                    end
-                end
-            end
+            output = mapSimplexElements!(f, output, m, groupid, x, elementstype, cutoff;
+                i,
+                filterj = >(i),
+            )
         end
     end
     return output

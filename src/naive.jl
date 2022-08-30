@@ -62,15 +62,14 @@ map a function to all elements in `groupid` in range of one simplex
 The function f should have the same form as used in CellListMap.jl
 Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
 
-`x` is always `element` and i is always 0.
+`x` is always `x` and i is always 0.
 
     function f(x,y,i,j,d2,output)
         # update output
         return output
     end
 """
-function mapSimplexElements!(f, output, m::Naive, groupid::Integer, element::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff_sqr::Float32) where {N, M}
-    x = element
+function mapSimplexElements!(f, output, m::Naive, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff_sqr::Float32) where {N, M}
     # just loop through all element in groupid
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
