@@ -6,20 +6,21 @@ And in figure 10 of "Francois Nedelec and Dietrich Foethke 2007 New J. Phys. 9 4
 to paint a grid with elements based on a maximum range.
 """
 struct Painter
-    grid_start::SVector{3,Float64}
+    grid_start::SVector{3,Float32}
 
     grid_size::SVector{3,Int32}
 
-    voxel_length::Float64
+    voxel_length::Float32
 
-    inv_voxel_length::Float64
+    inv_voxel_length::Float32
 
-    "Max ranges of each group"
-    max_range::SVector{2, Vector{Float64}}
+    "Max ranges of each group in grid units"
+    max_range::SVector{2, Vector{Float32}}
 
     "indexed by shape id then (groupid,x,y,z) to get a vector of elements painted"
     grids::SVector{2, Array{Vector{Tuple{Int32, Float32}}, 4}}
 
+    "in grid units"
     data::Tuple{Vector{Vector{Point}}, Vector{Vector{Line}}}
 
     "true if element exists"
@@ -40,7 +41,7 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer ;
         grid_size,
         voxel_length,
         inv(voxel_length),
-        max_range,
+        max_range= max_range .* inv(voxel_length)),
         SA[pointgrid, linegrid],
         ([Point[] for i in 1:numpointgroups], [Line[] for i in 1:numlinegroups]),
         ([Bool[] for i in 1:numpointgroups],  [Bool[] for i in 1:numlinegroups]),
@@ -60,20 +61,20 @@ function setElements(m::Painter, points, lines)
             groupexists = m.exists[n][groupid]
             resize!(group, length(in_group))
             resize!(groupexists, length(in_group))
-            group .= in_group
+            group .= (in_group .- m.grid_start) .* m.inv_voxel_length
             groupexists .= true
         end
     end
-    for (groupid, in_group) in enumerate(m.data[1])
+    for (groupid, group) in enumerate(m.data[1])
         max_range = m.max_range[1][groupid]
-        for (i, element) in enumerate(in_group)
-            paintElement(m, groupid, i, element, max_range)
+        for (i, element) in enumerate(group)
+            _paintElement(m, groupid, i, element, max_range)
         end
     end
-    for (groupid, in_group) in enumerate(m.data[2])
+    for (groupid, group) in enumerate(m.data[2])
         max_range = m.max_range[2][groupid]
-        for (i, element) in enumerate(in_group)
-            paintElement(m, groupid, i, element, max_range)
+        for (i, element) in enumerate(group)
+            _paintElement(m, groupid, i, element, max_range)
         end
     end
 
@@ -82,11 +83,12 @@ end
 """
 add a point, return the point id.
 """
-function addElement(m::Painter, groupid::Integer, element::Simplex{N}) where {N} ::Int64
-    group = push!(m.data[N][groupid],element)
+function addElement(m::Painter, groupid::Integer, element::Simplex{N}) where {N} ::Int32
+    x = (element .- m.grid_start) .* m.inv_voxel_length
+    group = push!(m.data[N][groupid], x)
     push!(m.exists[N][groupid], true)
     i = length(group)
-    paintElement(m, groupid, i, element, m.max_range[N][groupid])
+    _paintElement(m, groupid, i, x, m.max_range[N][groupid])
     return i
 end
 
@@ -111,38 +113,49 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapSimplexElements!(f, output, m::Painter, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float64;
+function mapSimplexElements!(
+        f, 
+        output, 
+        m::Painter, 
+        groupid::Integer, 
+        in_x::Simplex{N}, 
+        elementstype::Type{Simplex{M}}, 
+        in_cutoff::Float32
+        ;
+        x = (in_x .- m.grid_start) .* m.inv_voxel_length,
         i::Integer=0,
         filterj=Returns(true),
     ) where {N, M}
-    @argcheck cutoff ≤ m.max_range[M][groupid]
+    @argcheck cutoff ≤ m.max_range[M][groupid]*m.voxel_length
+    cutoff = in_cutoff * m.inv_voxel_length
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
     grid = grids[M]
-    voxelcutoff = Float64(1//2*√(3))*m.voxel_length + cutoff + MAX_SAMPLE_SPACING*m.voxel_length
-    voxelcutoff_sqr_f32 = Float32(voxelcutoff^2)
-    cutoff_sqr_f32 = Float32(cutoff^2)
+    voxelcutoff::Float32 = Float32(1//2*√(3)) + cutoff + MAX_SAMPLE_SPACING
+    voxelcutoff_sqr = voxelcutoff^2
+    cutoff_sqr = cutoff^2
     # sample unique voxels that the element goes in based on sampling points that are at most 1/8 voxel_length away from any point in the element.
-    mapSampleVoxels(m, x) do voxelid, numvoxels
+    mapSampleVoxels(x) do voxelid, numvoxels
         voxel = grid[groupid, voxelid...]
         for (j, sqrdist) in voxel
             if filterj(j)
-                if sqrdist ≤ voxelcutoff_sqr_f32
+                if sqrdist ≤ voxelcutoff_sqr
                     # load other element
                     if exists[j]
                         y = group[j]
                         @inline d2, s_min = distSqr_sMin(x, y)
-                        if d2 ≤ cutoff_sqr_f32
+                        if d2 ≤ cutoff_sqr
                             canonical_voxelid = if numvoxels > 1
                                 # check that this voxel is the canonical one.
-                                closest_sampled_s = getClosestSampledS(s_min, norm_x)
-                                closest_sampled_norm_x_pt = closest_sampled_s ⋅ norm_x
+                                closest_sampled_s = getClosestSampledS(s_min, x)
+                                closest_sampled_norm_x_pt = closest_sampled_s ⋅ x
                                 getVoxelId(closest_sampled_norm_x_pt)
                             else
                                 voxelid
                             end
                             if voxelid == canonical_voxelid
-                                @inline output = f(x, y, i, j, d2, output)
+                                in_y = (y .* m.voxel_length) .+ m.grid_start
+                                @inline output = f(in_x, in_y, i, j, d2, output)
                             end
                         end
                     end
@@ -154,77 +167,77 @@ function mapSimplexElements!(f, output, m::Painter, groupid::Integer, x::Simplex
 end
 
 
-"""
-map a function to all pairs of elements in the same group in range of each other.
+# """
+# map a function to all pairs of elements in the same group in range of each other.
 
-The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVector{3, Float32}}`
+# The function f should have the same form as used in CellListMap.jl
+# Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVector{3, Float32}}`
 
-    function f(x,y,i,j,d2,output)
-        # update output
-        return output
-    end
-"""
-function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float64) where {N}
-    # just double loop through all element in groupid
-    norm_cutoff = cutoff*m.inv_voxel_length
-    group = m.data[N][groupid]
-    exists = m.exists[N][groupid]
-    n = length(group)
-    for i in 1:(n-1)
-        if exists[i]
-            x = group[i]
-            output = mapSimplexElements!(f, output, m, groupid, x, elementstype, cutoff;
-                i,
-                filterj = >(i),
-            )
-        end
-    end
-    return output
-end
+#     function f(x,y,i,j,d2,output)
+#         # update output
+#         return output
+#     end
+# """
+# function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float64) where {N}
+#     # just double loop through all element in groupid
+#     norm_cutoff = cutoff*m.inv_voxel_length
+#     group = m.data[N][groupid]
+#     exists = m.exists[N][groupid]
+#     n = length(group)
+#     for i in 1:(n-1)
+#         if exists[i]
+#             x = group[i]
+#             output = mapSimplexElements!(f, output, m, groupid, x, elementstype, cutoff;
+#                 i,
+#                 filterj = >(i),
+#             )
+#         end
+#     end
+#     return output
+# end
 
 
-"""
-map a function to all pairs of elements in different groups in range of each other.
+# """
+# map a function to all pairs of elements in different groups in range of each other.
 
-The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
+# The function f should have the same form as used in CellListMap.jl
+# Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
 
-    function f(x,y,i,j,d2,output)
-        # update output
-        return output
-    end
-"""
-function mapPairElementsElements!(
-        f, 
-        output, 
-        m::Painter, 
-        x_groupid::Integer, 
-        x_elementstype::Type{Element{N}}, 
-        y_groupid::Integer, 
-        y_elementstype::Type{Element{M}}, 
-        cutoff_sqr::Float32,
-    ) where {N, M}
-    # just double loop through all element in groupid
-    x_group = m.data[N][x_groupid]
-    x_exists = m.exists[N][x_groupid]
-    y_group = m.data[M][y_groupid]
-    y_exists = m.exists[M][y_groupid]
-    xn = length(x_group)
-    yn = length(y_group)
-    for i in 1:xn
-        if x_exists[i]
-            x = x_group[i]
-            for j in 1:yn
-                if y_exists[j]
-                    y = y_group[j]
-                    @inline d2 = distSqr(x, y)
-                    if d2 ≤ cutoff_sqr
-                        @inline output = f(x, y, i, j, d2, output)
-                    end
-                end
-            end
-        end
-    end
-    return output
-end
+#     function f(x,y,i,j,d2,output)
+#         # update output
+#         return output
+#     end
+# """
+# function mapPairElementsElements!(
+#         f, 
+#         output, 
+#         m::Painter, 
+#         x_groupid::Integer, 
+#         x_elementstype::Type{Element{N}}, 
+#         y_groupid::Integer, 
+#         y_elementstype::Type{Element{M}}, 
+#         cutoff_sqr::Float32,
+#     ) where {N, M}
+#     # just double loop through all element in groupid
+#     x_group = m.data[N][x_groupid]
+#     x_exists = m.exists[N][x_groupid]
+#     y_group = m.data[M][y_groupid]
+#     y_exists = m.exists[M][y_groupid]
+#     xn = length(x_group)
+#     yn = length(y_group)
+#     for i in 1:xn
+#         if x_exists[i]
+#             x = x_group[i]
+#             for j in 1:yn
+#                 if y_exists[j]
+#                     y = y_group[j]
+#                     @inline d2 = distSqr(x, y)
+#                     if d2 ≤ cutoff_sqr
+#                         @inline output = f(x, y, i, j, d2, output)
+#                     end
+#                 end
+#             end
+#         end
+#     end
+#     return output
+# end
