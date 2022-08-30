@@ -41,11 +41,26 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer ;
         grid_size,
         voxel_length,
         inv(voxel_length),
-        max_range= max_range .* inv(voxel_length)),
+        max_range= max_range .* inv(voxel_length),
         SA[pointgrid, linegrid],
         ([Point[] for i in 1:numpointgroups], [Line[] for i in 1:numlinegroups]),
         ([Bool[] for i in 1:numpointgroups],  [Bool[] for i in 1:numlinegroups]),
     )
+end
+
+"""
+Paint an element onto the grid.
+All inputs have grid units.
+Max range is extended by `MAX_SAMPLE_SPACING` because of how elements are sampled. 
+Any voxel that may contain points within `max_range + MAX_SAMPLE_SPACING` of `element`
+will have `i`, and the distance squared, added to that voxel's list.
+
+In grid units, voxel (0,0,0) is a unit cube with center at SA[0.0, 0.0, 0.0]
+"""
+function _paintElement(m::Painter, groupid, i, element::Simplex{N}, max_range) where {N}
+    grid = grids[N]
+    #TODO try removing Float32(1//2*√(3)) and using an axis aligned unit cube to simplex distance function
+    voxelcutoff = Float32(1//2*√(3)) + max_range + MAX_SAMPLE_SPACING
 end
 
 
@@ -130,7 +145,7 @@ function mapSimplexElements!(
     cutoff = in_cutoff * m.inv_voxel_length
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
-    grid = grids[M]
+    grid = m.grids[M]
     voxelcutoff::Float32 = Float32(1//2*√(3)) + cutoff + MAX_SAMPLE_SPACING
     voxelcutoff_sqr = voxelcutoff^2
     cutoff_sqr = cutoff^2
