@@ -173,8 +173,10 @@ function mapSimplexElements!(
     voxelcutoff::Float32 = Float32(1//2*√(3)) + cutoff + MAX_SAMPLE_SPACING
     voxelcutoff_sqr = voxelcutoff^2
     cutoff_sqr = cutoff^2
+    voxel_length_sqr = m.voxel_length^2
     # sample unique voxels that the element goes in based on sampling points that are at most 1/8 voxel_length away from any point in the element.
-    mapSampleVoxels(x) do voxelid, numvoxels
+    mapSampleVoxels(x) do gridpoint, numvoxels
+        voxelid = gridpoint .+ Int32(1)
         voxel = grid[groupid, voxelid...]
         for (j, sqrdist) in voxel
             if filterj(j)
@@ -182,19 +184,23 @@ function mapSimplexElements!(
                     # load other element
                     if exists[j]
                         y = group[j]
-                        @inline d2, s_min = distSqr_sMin(x, y)
-                        if d2 ≤ cutoff_sqr
-                            canonical_voxelid = if numvoxels > 1
-                                # check that this voxel is the canonical one.
-                                closest_sampled_s = getClosestSampledS(s_min, x)
-                                closest_sampled_norm_x_pt = closest_sampled_s ⋅ x
-                                getVoxelId(closest_sampled_norm_x_pt)
-                            else
-                                voxelid
+                        # this case should only happen for long line segments or big triangles
+                        # The check ensure no double counting
+                        if numvoxels > 1
+                            @inline d2, s_min = distSqr_sMin(x, y)
+                            if d2 ≤ cutoff_sqr
+                                closest_sampled_x = _getClosestSampledPoint(s_min, x)
+                                canonical_grid_pt =_nearestGridPoint(closest_sampled_x)
+                                if gridpoint == canonical_grid_pt
+                                    in_y = (y .* m.voxel_length) .+ m.grid_start
+                                    @inline output = f(in_x, in_y, i, j, d2*voxel_length_sqr, output)
+                                end
                             end
-                            if voxelid == canonical_voxelid
+                        else
+                            @inline d2 = distSqr(x, y)
+                            if d2 ≤ cutoff_sqr
                                 in_y = (y .* m.voxel_length) .+ m.grid_start
-                                @inline output = f(in_x, in_y, i, j, d2, output)
+                                @inline output = f(in_x, in_y, i, j, d2*voxel_length_sqr, output)
                             end
                         end
                     end
