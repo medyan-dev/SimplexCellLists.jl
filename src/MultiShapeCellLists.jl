@@ -3,6 +3,7 @@ module MultiShapeCellLists
 include("distances.jl")
 
 using StaticArrays
+using ArgCheck
 
 const Simplex{N} = SVector{N, SVector{3, Float32}}
 const Point = Simplex{1}
@@ -33,5 +34,7 @@ Fields of implementations are not part of the the interface.
 """
 abstract type MultiShapeCellList end
 
+include("naive.jl")
+include("painter.jl")
 
 end

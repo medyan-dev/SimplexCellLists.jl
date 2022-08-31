@@ -5,7 +5,7 @@ This implementation is based on the idea in https://gitlab.com/f-nedelec/cytosim
 And in figure 10 of "Francois Nedelec and Dietrich Foethke 2007 New J. Phys. 9 427"
 to paint a grid with elements based on a maximum range.
 """
-struct Painter
+struct Painter <: MultiShapeCellList
     grid_start::SVector{3,Float32}
 
     grid_size::SVector{3,Int32}
@@ -120,9 +120,9 @@ function setElements(m::Painter, points, lines)
 end
 
 """
-add a point, return the point id.
+add a simplex, return the simplex id.
 """
-function addElement(m::Painter, groupid::Integer, element::Simplex{N}) where {N} ::Int32
+function addElement(m::Painter, groupid::Integer, element::Simplex{N})::Int32 where {N}
     x = (element .- m.grid_start) .* m.inv_voxel_length
     group = push!(m.data[N][groupid], x)
     push!(m.exists[N][groupid], true)
@@ -134,7 +134,7 @@ end
 """
 delete an element, the other element ids are stable.
 """
-function deleteElement(m::Painter, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}}) where {N} ::Nothing
+function deleteElement(m::Painter, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing where {N} 
     m.exists[N][groupid][elementid] = false
     return
 end
@@ -154,7 +154,7 @@ end
 Get the grid point that is sampled by x, to y.
 x and y are in grid units
 """
-@noinline function _canonicalGridPoint(x::Simplex{N}, y::Simplex{M}, grid_size, extra) where {N,M} ::SVector{3, Int32}
+@noinline function _canonicalGridPoint(x::Simplex{N}, y::Simplex{M}, grid_size, extra)::SVector{3, Int32} where {N,M} 
     if N == 1
         return _nearestGridPoint(grid_size, x[1])
     elseif N == 2
@@ -222,7 +222,7 @@ end
 
 
 """
-map a function to all elements in `groupid` in range of one element
+map a function to all elements in `groupid` in range of one simplex
 
 The function f should have the same form as used in CellListMap.jl
 Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`

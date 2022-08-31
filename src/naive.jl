@@ -40,9 +40,9 @@ function setElements(m::Naive, points, lines)
 end
 
 """
-add a point, return the point id.
+add a simplex, return the simplex id.
 """
-function addElement(m::Naive, groupid::Integer, element::Simplex{N}) where {N} ::Int64
+function addElement(m::Naive, groupid::Integer, element::Simplex{N})::Int32 where {N}
     group = push!(m.data[N][groupid],element)
     push!(m.exists[N][groupid], true)
     return length(group)
@@ -51,13 +51,13 @@ end
 """
 delete an element, the other element ids are stable.
 """
-function deleteElement(m::Naive, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}}) where {N} ::Nothing
+function deleteElement(m::Naive, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing where {N}
     m.exists[N][groupid][elementid] = false
     return
 end
 
 """
-map a function to all elements in `groupid` in range of one simplex
+map a function to all elements in `groupid` within distance `cutoff` of one simplex
 
 The function f should have the same form as used in CellListMap.jl
 Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
@@ -69,7 +69,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapSimplexElements!(f, output, m::Naive, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff_sqr::Float32) where {N, M}
+function mapSimplexElements!(f, output, m::Naive, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
     # just loop through all element in groupid
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
