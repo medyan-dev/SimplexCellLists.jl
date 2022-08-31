@@ -48,6 +48,9 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer ;
     )
 end
 
+"Return nearest grid point, x is in grid units"
+_nearestGridPoint(m::Painter, x::SVector{3,Float32}) = clamp.(round.(Int32, bottom), Int32(0), (m.grid_size .- Int32(1)))
+
 """
 Paint an element onto the grid.
 All inputs have grid units.
@@ -60,7 +63,28 @@ In grid units, voxel (0,0,0) is a unit cube with center at SA[0.0, 0.0, 0.0]
 function _paintElement(m::Painter, groupid, i, element::Simplex{N}, max_range) where {N}
     grid = grids[N]
     #TODO try removing Float32(1//2*√(3)) and using an axis aligned unit cube to simplex distance function
+    extended_max_range = max_range + MAX_SAMPLE_SPACING
     voxelcutoff = Float32(1//2*√(3)) + max_range + MAX_SAMPLE_SPACING
+    voxelcutoff2 = voxelcutoff^2
+    #TODO try cytosim's method of rasterizing instead of using an axis aligned bounding box
+    # Get the axis aligned bounding box
+    bottom = min.(element...)
+    top = max.(element...)
+    # Add max_range + MAX_SAMPLE_SPACING
+    bottom = bottom .- extended_max_range
+    top = top .+ extended_max_range
+    bottom_int = _nearestGridPoint(m, bottom)
+    top_int = _nearestGridPoint(m, top)
+    # Go through all voxel center points and check distance to element and paint if in range.
+    for voxel_int in Iterators.product(range.(bottom_int,top_int))
+        @inline voxel_float = convert.(Float32,voxel_int)
+        @inline d2 = distSqr(SA[voxel_float,], element)
+        if d2 ≤ voxelcutoff2
+            voxelid = voxel_int .+ Int32(1)
+            voxel = grid[groupid, voxelid...]
+            push!(voxel, (i,d2))
+        end
+    end
 end
 
 
