@@ -73,6 +73,7 @@ function mapSimplexElements!(f, output, m::Naive, groupid::Integer, x::Simplex{N
     # just loop through all element in groupid
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
+    cutoff_sqr = cutoff^2
     for (j, y) in enumerate(group)
         if exists[j]
             @inline d2 = distSqr(x, y)

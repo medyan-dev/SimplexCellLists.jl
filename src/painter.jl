@@ -29,10 +29,10 @@ end
 
 
 function Painter(numpointgroups::Integer, numlinegroups::Integer ;
-        grid_start::SVector{3,AbstractFloat},
-        grid_size::SVector{3,Integer},
+        grid_start::SVector{3,<:AbstractFloat},
+        grid_size::SVector{3,<:Integer},
         voxel_length::AbstractFloat,
-        max_range::SVector{2, Vector{AbstractFloat}},
+        max_range::SVector{2, <:Vector{<:AbstractFloat}},
     )
     pointgrid = [Tuple{Int32, Float32}[] for i in 1:numpointgroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
     linegrid = [Tuple{Int32, Float32}[] for i in 1:numlinegroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
@@ -41,7 +41,7 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer ;
         grid_size,
         voxel_length,
         inv(voxel_length),
-        max_range= max_range .* inv(voxel_length),
+        max_range .* inv(voxel_length),
         SA[pointgrid, linegrid],
         ([Point[] for i in 1:numpointgroups], [Line[] for i in 1:numlinegroups]),
         ([Bool[] for i in 1:numpointgroups],  [Bool[] for i in 1:numlinegroups]),
@@ -61,7 +61,7 @@ will have `i`, and the distance squared, added to that voxel's list.
 In grid units, voxel (0,0,0) is a unit cube with center at SA[0.0, 0.0, 0.0]
 """
 function _paintElement(m::Painter, groupid, i, element::Simplex{N}, max_range) where {N}
-    grid = grids[N]
+    grid = m.grids[N]
     #TODO try removing Float32(1//2*√(3)) and using an axis aligned unit cube to simplex distance function
     extended_max_range = max_range + MAX_SAMPLE_SPACING
     voxelcutoff = Float32(1//2*√(3)) + max_range + MAX_SAMPLE_SPACING
@@ -76,8 +76,8 @@ function _paintElement(m::Painter, groupid, i, element::Simplex{N}, max_range) w
     bottom_int = _nearestGridPoint(m.grid_size, bottom)
     top_int = _nearestGridPoint(m.grid_size, top)
     # Go through all voxel center points and check distance to element and paint if in range.
-    for voxel_int in Iterators.product(range.(bottom_int,top_int))
-        @inline voxel_float = convert.(Float32,voxel_int)
+    for voxel_int in Iterators.product(range.(bottom_int,top_int)...)
+        @inline voxel_float = SVector{3,Float32}(voxel_int...)
         @inline d2 = distSqr(SA[voxel_float,], element)
         if d2 ≤ voxelcutoff2
             voxelid = voxel_int .+ Int32(1)
@@ -100,7 +100,11 @@ function setElements(m::Painter, points, lines)
             groupexists = m.exists[n][groupid]
             resize!(group, length(in_group))
             resize!(groupexists, length(in_group))
-            group .= (in_group .- m.grid_start) .* m.inv_voxel_length
+            i = 0
+            for stuff in in_group
+                i += 1
+                group[i] = (stuff .- (m.grid_start,)) .* m.inv_voxel_length
+            end
             groupexists .= true
         end
     end
@@ -123,7 +127,7 @@ end
 add a simplex, return the simplex id.
 """
 function addElement(m::Painter, groupid::Integer, element::Simplex{N})::Int32 where {N}
-    x = (element .- m.grid_start) .* m.inv_voxel_length
+    x = (element .- (m.grid_start,)) .* m.inv_voxel_length
     group = push!(m.data[N][groupid], x)
     push!(m.exists[N][groupid], true)
     i = length(group)
@@ -177,7 +181,7 @@ Call output = f(gridpoint, is_one_voxel, extra, output)
 for each unique voxel sampled, then return the final output.
 All points on x must be within MAX_SAMPLE_SPACING of a sampled voxel.
 """
-@inline function _mapSampleVoxels(f, grid_size, x::Simplex{N}, output) where {N}
+@inline function _mapSampleVoxels(f, x::Simplex{N}, grid_size, output) where {N}
     if N == 1
         gridpoint = _nearestGridPoint(grid_size, x[1])
         return @inline f(gridpoint, true, nothing, output)
@@ -243,12 +247,12 @@ function mapSimplexElements!(
         elementstype::Type{Simplex{M}}, 
         in_cutoff::Float32
         ;
-        x = (in_x .- m.grid_start) .* m.inv_voxel_length,
+        x = (in_x .- (m.grid_start,)) .* m.inv_voxel_length,
         i::Integer=0,
         filterj=Returns(true),
     ) where {N, M}
-    @argcheck cutoff ≤ m.max_range[M][groupid]*m.voxel_length
     cutoff = in_cutoff * m.inv_voxel_length
+    @argcheck cutoff ≤ m.max_range[M][groupid]
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
     grid = m.grids[M]
@@ -272,14 +276,14 @@ function mapSimplexElements!(
                             @inline local d2 = distSqr(x, y)
                             if d2 ≤ cutoff_sqr
                                 if gridpoint == _canonicalGridPoint(x, y, m.grid_size, extra)
-                                    local in_y = (y .* m.voxel_length) .+ m.grid_start
+                                    local in_y = (y .* m.voxel_length) .+ (m.grid_start,)
                                     @inline output = f(in_x, in_y, i, j, d2*voxel_length_sqr, output)
                                 end
                             end
                         else
                             @inline local d2 = distSqr(x, y)
                             if d2 ≤ cutoff_sqr
-                                local in_y = (y .* m.voxel_length) .+ m.grid_start
+                                local in_y = (y .* m.voxel_length) .+ (m.grid_start,)
                                 @inline output = f(in_x, in_y, i, j, d2*voxel_length_sqr, output)
                             end
                         end
