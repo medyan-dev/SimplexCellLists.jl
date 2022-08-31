@@ -46,7 +46,18 @@ end
     a = rand(SVector{1,SVector{3,Float64}},N)
     b = rand(SVector{2,SVector{3,Float64}},N)
     for i in 1:N
-        @test refDist2(a[i],b[i]) ≈ MultiShapeCellLists.dist2PointLine(a[i],b[i])
+        ref_d2min = refDist2(a[i],b[i])
+        d2min = MultiShapeCellLists.dist2PointLine(a[i],b[i])
+        d2min_t, tmin = MultiShapeCellLists.dist2PointLine_t(a[i],b[i])
+        @test 0 ≤ d2min_t
+        @test d2min ≈ d2min_t
+        @test 0 ≤ d2min
+        @test ref_d2min ≈ d2min
+        @test 0 ≤ tmin ≤ 1
+        s_full = SA[1.0]
+        t_full = SA[1.0-tmin, tmin]
+        r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
+        @test d2min ≈ r⋅r
     end
 end
 
@@ -55,6 +66,17 @@ end
     a = rand(SVector{2,SVector{3,Float64}},N)
     b = rand(SVector{2,SVector{3,Float64}},N)
     for i in 1:N
-        @test refDist2(a[i],b[i]) ≈ MultiShapeCellLists.dist2LineLine(a[i],b[i])
+        ref_d2min = refDist2(a[i],b[i])
+        d2min = MultiShapeCellLists.dist2LineLine(a[i],b[i])
+        d2min_s_t, smin, tmin = MultiShapeCellLists.dist2LineLine_s_t(a[i],b[i])
+        @test 0 ≤ d2min_s_t
+        @test d2min ≈ d2min_s_t
+        @test 0 ≤ d2min
+        @test ref_d2min ≈ d2min
+        @test 0 ≤ tmin ≤ 1
+        s_full = SA[1.0-smin, smin]
+        t_full = SA[1.0-tmin, tmin]
+        r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
+        @test d2min ≈ r⋅r
     end
 end

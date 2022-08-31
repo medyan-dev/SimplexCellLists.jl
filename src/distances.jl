@@ -6,17 +6,17 @@ dist2PointPoint(a,b) = (a[1] - b[1]) ⋅ (a[1] - b[1])
 
 
 "Return the minimum distance squared and where on the line it occurs, from 0 to 1"
-function dist2PointLine_s(x,y)
+function dist2PointLine_t(x,y)
     r= y[2]-y[1]
     p= x[1]-y[1]
     # c= a[1]-b[2]
-    s = clamp01nan(p⋅r/(r⋅r))
-    d = s*r - p
-    d⋅d, s
+    t = clamp01nan(p⋅r/(r⋅r))
+    d = t*r - p
+    d⋅d, t
 end
 
 function dist2PointLine(x,y)
-    dist2PointLine_s(x,y)[1]
+    dist2PointLine_t(x,y)[1]
 end
 
 """
@@ -111,21 +111,21 @@ function dist2LineLine_s_t(x,y)
     if  r(s0,0) < minr
         minr = r(s0,0)
         mins = s0
-        mint = 0
+        mint = zero(a)
     end
     if  r(s1,1) < minr
         minr = r(s1,1)
         mins = s1
-        mint = 1
+        mint = one(a)
     end
     if  r(0,t0) < minr
         minr = r(0,t0)
-        mins = 0
+        mins = zero(a)
         mint = t0
     end
     if  r(1,t1) < minr
         minr = r(1,t1)
-        mins = 1
+        mins = one(a)
         mint = t1
     end
     d2cl = max(0,f+minr)
