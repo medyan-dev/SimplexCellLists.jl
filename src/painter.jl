@@ -20,6 +20,10 @@ struct Painter <: MultiShapeCellList
     "indexed by shape id then (groupid,x,y,z) to get a vector of elements painted"
     grids::SVector{2, Array{Vector{Tuple{Int32, Float32}}, 4}}
 
+    "A place to put stuff that is outside the grid
+    indexed by shape id then groupid to get a vector of elements painted outside the grid"
+    outsidegrids::SVector{2, Vector{Vector{Tuple{Int32, Float32}}}}
+
     "in grid units"
     data::Tuple{Vector{Vector{Point}}, Vector{Vector{Line}}}
 
@@ -45,13 +49,24 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer ;
         inv(voxel_length),
         max_range .* inv(voxel_length),
         SA[pointgrid, linegrid],
+        SA[[Tuple{Int32, Float32}[] for i in 1:numpointgroups], [Tuple{Int32, Float32}[] for i in 1:numlinegroups]], 
         ([Point[] for i in 1:numpointgroups], [Line[] for i in 1:numlinegroups]),
         ([Bool[] for i in 1:numpointgroups],  [Bool[] for i in 1:numlinegroups]),
     )
 end
 
-"Return nearest grid point, x is in grid units"
-_nearestGridPoint(grid_size::SVector{3,Int32}, x::SVector{3,Float32}) = clamp.(round.(Int32, x), Int32(0), (grid_size .- Int32(1)))
+"""
+Return nearest grid point, x is in grid units
+Return nothing if outside of the grid
+"""
+function _nearestGridPoint(grid_size::SVector{3,Int32}, x::SVector{3,Float32})
+    x_int = round.(Int32, x)
+    if any(x_int .> (grid_size .- Int32(1))) || any(x_int .< Int32(0))
+        nothing
+    else
+        x_int
+    end
+end
 
 """
 Paint an element onto the grid.
@@ -64,6 +79,7 @@ In grid units, voxel (0,0,0) is a unit cube with center at SA[0.0, 0.0, 0.0]
 """
 function _paintElement(m::Painter, groupid, i, element::Simplex{N}, max_range) where {N}
     grid = m.grids[N]
+    outsidegrid = m.outsidegrids[N]
     #TODO try removing Float32(1//2*√(3)) and using an axis aligned unit cube to simplex distance function
     extended_max_range = max_range + MAX_SAMPLE_SPACING
     voxelcutoff = Float32(1//2*√(3)) + max_range + MAX_SAMPLE_SPACING
@@ -75,17 +91,26 @@ function _paintElement(m::Painter, groupid, i, element::Simplex{N}, max_range) w
     # Add max_range + MAX_SAMPLE_SPACING
     bottom = bottom .- extended_max_range
     top = top .+ extended_max_range
-    bottom_int = _nearestGridPoint(m.grid_size, bottom)
-    top_int = _nearestGridPoint(m.grid_size, top)
+    bottom_int = round.(Int32, bottom)
+    top_int = round.(Int32, top)
     # Go through all voxel center points and check distance to element and paint if in range.
+    min_outside_d2 = Inf32
     for voxel_int in Iterators.product(range.(bottom_int,top_int)...)
+        # @show voxel_int
         @inline voxel_float = SVector{3,Float32}(voxel_int...)
         @inline d2 = distSqr(SA[voxel_float,], element)
         if d2 ≤ voxelcutoff2
-            voxelid = voxel_int .+ Int32(1)
-            voxel = grid[groupid, voxelid...]
-            push!(voxel, (i,d2))
+            if any(voxel_int .> (m.grid_size .- Int32(1))) || any(voxel_int .< Int32(0))
+                min_outside_d2 = min(min_outside_d2, d2)
+            else
+                voxelid = voxel_int .+ Int32(1)
+                voxel = grid[groupid, voxelid...]
+                push!(voxel, (i,d2))
+            end
         end
+    end
+    if isfinite(min_outside_d2)
+        push!(outsidegrid[groupid],(i,min_outside_d2))
     end
 end
 
@@ -160,7 +185,7 @@ end
 Get the grid point that is sampled by x, to y.
 x and y are in grid units
 """
-@noinline function _canonicalGridPoint(x::Simplex{N}, y::Simplex{M}, grid_size, extra)::SVector{3, Int32} where {N,M} 
+@noinline function _canonicalGridPoint(x::Simplex{N}, y::Simplex{M}, grid_size, extra)::Union{Nothing,SVector{3, Int32}} where {N,M} 
     if N == 1
         return _nearestGridPoint(grid_size, x[1])
     elseif N == 2
@@ -170,7 +195,7 @@ x and y are in grid units
             halfn::Int32, inv_n::Float32 = extra
             d2, smin = distSqr_sMin(x,y)
             n = Int32(2)*halfn
-            R::Int32 = min(trunc(Int32, smin[1]*halfn),halfn-Int32(1))*Int32(2) + Int32(1)
+            R::Int32 = clamp(trunc(Int32, smin[1]*halfn),Int32(0),halfn-Int32(1))*Int32(2) + Int32(1)
             return _getSampleGridPoint(inv_n, n, R, x, grid_size)
         end
     else
@@ -204,49 +229,7 @@ function mapSimplexElements!(
         i::Int32=Int32(0),
         filterj=Returns(true),
     ) where {N, M}
-    cutoff = in_cutoff * m.inv_voxel_length
-    @argcheck cutoff ≤ m.max_range[M][groupid]
-    group = m.data[M][groupid]
-    exists = m.exists[M][groupid]
-    grid = m.grids[M]
-    voxelcutoff::Float32 = Float32(1//2*√(3)) + cutoff + MAX_SAMPLE_SPACING
-    voxelcutoff_sqr = voxelcutoff^2
-    cutoff_sqr = cutoff^2
-    voxel_length_sqr = m.voxel_length^2
-    # sample unique voxels that the element goes in based on sampling points that are at most 1/8 voxel_length away from any point in the element.
-    return _mapSampleVoxels(x, m.grid_size, output, f, in_x) do gridpoint, is_one_voxel, extra, output2, f, in_x
-        @inline
-        local voxelid = gridpoint .+ Int32(1)
-        local voxel = grid[groupid, voxelid...]
-        for (j, sqrdist) in voxel
-            if filterj(j)
-                if sqrdist ≤ voxelcutoff_sqr
-                    # load other element
-                    if exists[j]
-                        local y = group[j]
-                        # this case should only happen for long line segments or big triangles
-                        # The check ensure no double counting
-                        if !is_one_voxel
-                            @inline local d2 = distSqr(x, y)
-                            if d2 ≤ cutoff_sqr
-                                if gridpoint == _canonicalGridPoint(x, y, m.grid_size, extra)
-                                    local in_y = (y .* m.voxel_length) .+ (m.grid_start,)
-                                    @inline output2 = f(in_x, in_y, i, j, d2*voxel_length_sqr, output2)
-                                end
-                            end
-                        else
-                            @inline local d2 = distSqr(x, y)
-                            if d2 ≤ cutoff_sqr
-                                local in_y = (y .* m.voxel_length) .+ (m.grid_start,)
-                                output2 = f(in_x, in_y, i, j, d2*voxel_length_sqr, output2)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        return output2
-    end
+    error("Not implemented for those simplexes")
 end
 
 #point to other
@@ -268,14 +251,19 @@ function mapSimplexElements!(
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
     grid = m.grids[M]
+    outsidegrid = m.outsidegrids[M]
     voxelcutoff::Float32 = Float32(1//2*√(3)) + cutoff + MAX_SAMPLE_SPACING
     voxelcutoff_sqr = voxelcutoff^2
     cutoff_sqr = cutoff^2
     voxel_length_sqr = m.voxel_length^2
     # sample unique voxels that the element goes in based on sampling points that are at most 1/8 voxel_length away from any point in the element.
     gridpoint = _nearestGridPoint(m.grid_size, x[1])
-    voxelid = gridpoint .+ Int32(1)
-    voxel = grid[groupid, voxelid...]
+    voxel = if isnothing(gridpoint)
+        outsidegrid[groupid]
+    else
+        voxelid = gridpoint .+ Int32(1)
+        grid[groupid, voxelid...]
+    end
     for (j, sqrdist) in voxel
         if filterj(j)
             if sqrdist ≤ voxelcutoff_sqr
@@ -313,6 +301,7 @@ function mapSimplexElements!(
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
     grid = m.grids[M]
+    outsidegrid = m.outsidegrids[M]
     voxelcutoff::Float32 = Float32(1//2*√(3)) + cutoff + MAX_SAMPLE_SPACING
     voxelcutoff_sqr = voxelcutoff^2
     cutoff_sqr = cutoff^2
@@ -333,13 +322,17 @@ function mapSimplexElements!(
         end_pt = (1-small_s)*x[2] + (small_s)*x[1]
         gridpoint1 = _nearestGridPoint(m.grid_size, start_pt)
         gridpoint2 = _nearestGridPoint(m.grid_size, end_pt)
-        if gridpoint1 == gridpoint2
+        if gridpoint1 == gridpoint2 && !isnothing(gridpoint1)
             usemidpoint = true
         end
     end
     if usemidpoint
-        voxelid = midgridpoint .+ Int32(1)
-        voxel = grid[groupid, voxelid...]
+        voxel = if isnothing(midgridpoint)
+            outsidegrid[groupid]
+        else
+            voxelid = midgridpoint .+ Int32(1)
+            grid[groupid, voxelid...]
+        end
         for (j, sqrdist) in voxel
             if filterj(j)
                 if sqrdist ≤ voxelcutoff_sqr
@@ -356,7 +349,6 @@ function mapSimplexElements!(
             end
         end
     else
-        # @info "multiple samples"
         # Now more than one voxel needs to be sampled, yikes.
         # I need to ensure that _canonicalGridPoint can find a gridpoint that is actually sampled
         # This is to avoid double counting
@@ -366,22 +358,18 @@ function mapSimplexElements!(
         extra = (halfn, inv_n)
         n = Int32(2)*halfn
         prevgridpoint = SA[Int32(-1),Int32(-1),Int32(-1)]
+        checked_outside = false
         for i in Int32(1):Int32(2):n
             gridpoint = _getSampleGridPoint(inv_n, n, i, x, m.grid_size)
-            if gridpoint != prevgridpoint
-                # @show gridpoint
-                voxelid = gridpoint .+ Int32(1)
-                voxel = grid[groupid, voxelid...]
+            if gridpoint != prevgridpoint && !(checked_outside && isnothing(gridpoint))
+                voxel = if isnothing(gridpoint)
+                    checked_outside = true
+                    outsidegrid[groupid]
+                else
+                    voxelid = gridpoint .+ Int32(1)
+                    grid[groupid, voxelid...]
+                end
                 for (j, sqrdist) in voxel
-                    # if j==13
-                    #     println("j == 13 at $gridpoint")
-                    #     y = group[j]
-                    #     d2 = distSqr(x, y)
-                    #     c_gridpoint = _canonicalGridPoint(x, y, m.grid_size, extra)
-                    #     @show d2
-                    #     @show c_gridpoint
-                    #     println()
-                    # end
                     if filterj(j)
                         if sqrdist ≤ voxelcutoff_sqr
                             # load other element
