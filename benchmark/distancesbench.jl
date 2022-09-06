@@ -1,12 +1,12 @@
 using StaticArrays
 using LinearAlgebra
-using MultiShapeCellLists
+using SimplexCellLists
 using Random
 using BenchmarkTools
 
 function dist2linelinevect!(r,a,b)
     @inbounds for i in eachindex(r, a, b)
-        @inline r[i] = MultiShapeCellLists.dist2LineLine(a[i],b[i])
+        @inline r[i] = SimplexCellLists.dist2LineLine(a[i],b[i])
     end
 end
 
@@ -20,7 +20,7 @@ r = zeros(Float32, N)
 
 function dist2pointlinevect!(r,a,b)
     @inbounds for i in eachindex(r, a, b)
-        @inline r[i] = MultiShapeCellLists.dist2PointLine(a[i],b[i])
+        @inline r[i] = SimplexCellLists.dist2PointLine(a[i],b[i])
     end
 end
 
@@ -34,7 +34,7 @@ r = zeros(Float32, N)
 
 function dist2pointpointvect!(r,a,b)
     @inbounds for i in eachindex(r, a, b)
-        @inline r[i] = MultiShapeCellLists.dist2PointPoint(a[i],b[i])
+        @inline r[i] = SimplexCellLists.dist2PointPoint(a[i],b[i])
     end
 end
 

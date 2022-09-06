@@ -1,4 +1,4 @@
-module MultiShapeCellLists
+module SimplexCellLists
 
 include("distances.jl")
 

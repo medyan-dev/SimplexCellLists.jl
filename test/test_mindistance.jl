@@ -3,7 +3,7 @@
 using JuMP
 using StaticArrays
 using LinearAlgebra
-using MultiShapeCellLists
+using SimplexCellLists
 using Random
 using Test
 using Clarabel
@@ -37,7 +37,7 @@ Random.seed!(1234)
     a = rand(SVector{1,SVector{3,Float64}},N)
     b = rand(SVector{1,SVector{3,Float64}},N)
     for i in 1:N
-        @test refDist2(a[i],b[i]) ≈ MultiShapeCellLists.dist2PointPoint(a[i],b[i])
+        @test refDist2(a[i],b[i]) ≈ SimplexCellLists.dist2PointPoint(a[i],b[i])
     end
 end
 
@@ -47,8 +47,8 @@ end
     b = rand(SVector{2,SVector{3,Float64}},N)
     for i in 1:N
         ref_d2min = refDist2(a[i],b[i])
-        d2min = MultiShapeCellLists.dist2PointLine(a[i],b[i])
-        d2min_t, tmin = MultiShapeCellLists.dist2PointLine_t(a[i],b[i])
+        d2min = SimplexCellLists.dist2PointLine(a[i],b[i])
+        d2min_t, tmin = SimplexCellLists.dist2PointLine_t(a[i],b[i])
         @test 0 ≤ d2min_t
         @test d2min ≈ d2min_t
         @test 0 ≤ d2min
@@ -67,8 +67,8 @@ end
     b = rand(SVector{2,SVector{3,Float64}},N)
     for i in 1:N
         ref_d2min = refDist2(a[i],b[i])
-        d2min = MultiShapeCellLists.dist2LineLine(a[i],b[i])
-        d2min_s_t, smin, tmin = MultiShapeCellLists.dist2LineLine_s_t(a[i],b[i])
+        d2min = SimplexCellLists.dist2LineLine(a[i],b[i])
+        d2min_s_t, smin, tmin = SimplexCellLists.dist2LineLine_s_t(a[i],b[i])
         @test 0 ≤ d2min_s_t
         @test d2min ≈ d2min_s_t
         @test 0 ≤ d2min
