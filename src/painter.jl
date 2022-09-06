@@ -121,7 +121,9 @@ Set the elements stored in the cell list.
 function setElements(m::Painter, points, lines)
     @argcheck length(points) == length(m.data[1])
     @argcheck length(lines) == length(m.data[2])
-    for (n, in_data) in enumerate((points, lines,))
+    in_data_tuple = (points, lines,)
+    Base.Cartesian.@nexprs 2 n -> begin
+        in_data = in_data_tuple[n]
         for (groupid, in_group) in enumerate(in_data)
             group = m.data[n][groupid]
             groupexists = m.exists[n][groupid]
