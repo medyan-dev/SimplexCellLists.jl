@@ -359,8 +359,8 @@ function mapSimplexElements!(
         n = Int32(2)*halfn
         prevgridpoint = SA[Int32(-1),Int32(-1),Int32(-1)]
         checked_outside = false
-        for i in Int32(1):Int32(2):n
-            gridpoint = _getSampleGridPoint(inv_n, n, i, x, m.grid_size)
+        for samplei in Int32(1):Int32(2):n
+            gridpoint = _getSampleGridPoint(inv_n, n, samplei, x, m.grid_size)
             if gridpoint != prevgridpoint && !(checked_outside && isnothing(gridpoint))
                 voxel = if isnothing(gridpoint)
                     checked_outside = true
@@ -394,34 +394,37 @@ function mapSimplexElements!(
     return output
 end
 
-# """
-# map a function to all pairs of elements in the same group in range of each other.
+"""
+map a function to all pairs of elements in the same group in range of each other.
 
-# The function f should have the same form as used in CellListMap.jl
-# Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVector{3, Float32}}`
+The function f should have the same form as used in CellListMap.jl
+Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVector{3, Float32}}`
 
-#     function f(x,y,i,j,d2,output)
-#         # update output
-#         return output
-#     end
-# """
-# function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float64) where {N}
-#     # just double loop through all element in groupid
-#     norm_cutoff = cutoff*m.inv_voxel_length
-#     group = m.data[N][groupid]
-#     exists = m.exists[N][groupid]
-#     n = length(group)
-#     for i in 1:(n-1)
-#         if exists[i]
-#             x = group[i]
-#             output = mapSimplexElements!(f, output, m, groupid, x, elementstype, cutoff;
-#                 i,
-#                 filterj = >(i),
-#             )
-#         end
-#     end
-#     return output
-# end
+    function f(x,y,i,j,d2,output)
+        # update output
+        return output
+    end
+"""
+function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
+    # loop through all element in groupid
+    # and call mapSimplexElements! with extra optional parameters
+    # to only run on elements with id > i, to avoid double counting
+    group = m.data[N][groupid]
+    exists = m.exists[N][groupid]
+    n = length(group)
+    for i in Int32(1):Int32(n-1)
+        if exists[i]
+            x = group[i]
+            in_x = (x .* m.voxel_length) .+ (m.grid_start,)
+            output = mapSimplexElements!(f, output, m, groupid, in_x, elementstype, cutoff;
+                i,
+                filterj = >(i),
+                x,
+            )
+        end
+    end
+    return output
+end
 
 
 # """

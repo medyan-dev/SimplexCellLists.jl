@@ -78,7 +78,7 @@ function mapSimplexElements!(f, output, m::Naive, groupid::Integer, x::Simplex{N
         if exists[j]
             @inline d2 = distSqr(x, y)
             if d2 ≤ cutoff_sqr
-                @inline output = f(x, y, 0, j, d2, output)
+                @inline output = f(x, y, 0%Int32, j%Int32, d2, output)
             end
         end
     end
@@ -97,8 +97,9 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVect
         return output
     end
 """
-function mapPairElements!(f, output, m::Naive, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff_sqr::Float32) where {N}
+function mapPairElements!(f, output, m::Naive, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
     # just double loop through all element in groupid
+    cutoff_sqr = cutoff^2
     group = m.data[N][groupid]
     exists = m.exists[N][groupid]
     n = length(group)
@@ -110,7 +111,7 @@ function mapPairElements!(f, output, m::Naive, groupid::Integer, elementstype::T
                     y = group[j]
                     @inline d2 = distSqr(x, y)
                     if d2 ≤ cutoff_sqr
-                        @inline output = f(x, y, i, j, d2, output)
+                        @inline output = f(x, y, i%Int32, j%Int32, d2, output)
                     end
                 end
             end
@@ -156,7 +157,7 @@ function mapPairElementsElements!(
                     y = y_group[j]
                     @inline d2 = distSqr(x, y)
                     if d2 ≤ cutoff_sqr
-                        @inline output = f(x, y, i, j, d2, output)
+                        @inline output = f(x, y, i%Int32, j%Int32, d2, output)
                     end
                 end
             end
