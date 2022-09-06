@@ -1,4 +1,4 @@
-name = "MultiShapeCellLists"
+name = "SimplexCellLists"
 uuid = "fbe69cd6-f244-4ce4-a90b-8979d86c9ea4"
 authors = ["Nathan Zimmerberg"]
 version = "0.1.0"
