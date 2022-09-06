@@ -363,28 +363,32 @@ end
     @test out == 1
 end
 
-@testset "line line pairs" begin
+@testset "map pairs" begin
     for trial in 1:10
-        #@show trial
         N = 1000
         lines = rand(SVector{2,SVector{3,Float32}},N)
-        naive = SimplexCellLists.Naive(0, 1)
-        painter = SimplexCellLists.Painter(0, 1;
-            grid_start= SA[0.1,0.0,0.0],
+        points = rand(SVector{1,SVector{3,Float32}},N)
+        naive = SimplexCellLists.Naive(1, 1)
+        painter = SimplexCellLists.Painter(1, 1;
+            grid_start= SA[0.0,0.0,0.0],
             grid_size= SA[10,10,10],
             voxel_length= 1/10,
-            max_range= SA[Float64[],Float64[0.1]],
+            max_range= SA[Float64[0.1],Float64[0.1]],
         )
-        SimplexCellLists.setElements(naive,[],[lines])
-        SimplexCellLists.setElements(painter,[],[lines])
+        SimplexCellLists.setElements(naive,[points],[lines])
+        SimplexCellLists.setElements(painter,[points],[lines])
         SimplexCellLists.addElement(naive,1,lines[1])
         SimplexCellLists.addElement(painter,1,lines[1])
+        SimplexCellLists.addElement(naive,1,points[1])
+        SimplexCellLists.addElement(painter,1,points[1])
         push!(lines,lines[1])
+        push!(points,points[1])
         delid = rand(eachindex(lines))
         SimplexCellLists.deleteElement(painter, 1, delid, SimplexCellLists.Line)
         SimplexCellLists.deleteElement(naive, 1, delid, SimplexCellLists.Line)
-        cutoff = 0.09f0
-        function f!(x,y,i,j,d2,output)
+        cutoff = 0.1f0
+        #@show trial
+        function LLf!(x,y,i,j,d2,output)
             d2 = SimplexCellLists.distSqr(lines[i], lines[j])
             if √(d2) < cutoff-1E-5
                 output[i,j] += 1
@@ -392,33 +396,91 @@ end
             end
             output
         end
-        naive_out = SimplexCellLists.mapPairElements!(
-            f!,
+        function LPf!(x,y,i,j,d2,output)
+            d2 = SimplexCellLists.distSqr(lines[i], points[j])
+            if √(d2) < cutoff-1E-5
+                output[i,j] += 1
+                output[j,i] += 1
+            end
+            output
+        end
+        function PPf!(x,y,i,j,d2,output)
+            d2 = SimplexCellLists.distSqr(points[i], points[j])
+            if √(d2) < cutoff-1E-5
+                output[i,j] += 1
+                output[j,i] += 1
+            end
+            output
+        end
+        naive_out_LL = SimplexCellLists.mapPairElements!(
+            LLf!,
             zeros(length(lines),length(lines)),
             naive,
             1,
             SimplexCellLists.Line,
             cutoff,
         )
-        painter_out = SimplexCellLists.mapPairElements!(
-            f!,
+        painter_out_LL = SimplexCellLists.mapPairElements!(
+            LLf!,
             zeros(length(lines),length(lines)),
             painter,
             1,
             SimplexCellLists.Line,
             cutoff,
         )
-        if naive_out != painter_out
-            dif_inds = findall(naive_out .!= painter_out)
-            for ind in dif_inds
-                @show ind
-                @show naive_out[ind], painter_out[ind]
-                d2 = SimplexCellLists.distSqr(lines[ind[1]], lines[ind[2]])
-                @show d2
-                @show √(d2)
+
+        naive_out_PP = SimplexCellLists.mapPairElements!(
+            PPf!,
+            zeros(length(points),length(points)),
+            naive,
+            1,
+            SimplexCellLists.Point,
+            cutoff,
+        )
+        painter_out_PP = SimplexCellLists.mapPairElements!(
+            PPf!,
+            zeros(length(points),length(points)),
+            painter,
+            1,
+            SimplexCellLists.Point,
+            cutoff,
+        )
+
+        naive_out_LP = SimplexCellLists.mapElementsElements!(
+            LPf!,
+            zeros(length(lines),length(points)),
+            naive,
+            1,
+            SimplexCellLists.Line,
+            1,
+            SimplexCellLists.Point,
+            cutoff,
+        )
+        painter_out_LP = SimplexCellLists.mapElementsElements!(
+            LPf!,
+            zeros(length(lines),length(points)),
+            painter,
+            1,
+            SimplexCellLists.Line,
+            1,
+            SimplexCellLists.Point,
+            cutoff,
+        )
+        for (painter_out, naive_out, name) in ((painter_out_LL, naive_out_LL, "Line Line"), (painter_out_LP, naive_out_LP, "Line Point"), (painter_out_PP, naive_out_PP, "Point Point"))
+            if naive_out != painter_out
+                println(name)
+                dif_inds = findall(naive_out .!= painter_out)
+                for ind in dif_inds
+                    @show ind
+                    @show naive_out[ind], painter_out[ind]
+                    d2 = SimplexCellLists.distSqr(lines[ind[1]], lines[ind[2]])
+                    @show d2
+                    @show √(d2)
+                    println()
+                end
                 println()
             end
+            @test naive_out == painter_out
         end
-        @test naive_out == painter_out
     end
 end

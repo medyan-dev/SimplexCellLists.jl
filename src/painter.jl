@@ -427,47 +427,43 @@ function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype:
 end
 
 
-# """
-# map a function to all pairs of elements in different groups in range of each other.
+"""
+map a function to all pairs of elements in different groups in range of each other.
 
-# The function f should have the same form as used in CellListMap.jl
-# Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
+The function f should have the same form as used in CellListMap.jl
+Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
 
-#     function f(x,y,i,j,d2,output)
-#         # update output
-#         return output
-#     end
-# """
-# function mapPairElementsElements!(
-#         f, 
-#         output, 
-#         m::Painter, 
-#         x_groupid::Integer, 
-#         x_elementstype::Type{Element{N}}, 
-#         y_groupid::Integer, 
-#         y_elementstype::Type{Element{M}}, 
-#         cutoff_sqr::Float32,
-#     ) where {N, M}
-#     # just double loop through all element in groupid
-#     x_group = m.data[N][x_groupid]
-#     x_exists = m.exists[N][x_groupid]
-#     y_group = m.data[M][y_groupid]
-#     y_exists = m.exists[M][y_groupid]
-#     xn = length(x_group)
-#     yn = length(y_group)
-#     for i in 1:xn
-#         if x_exists[i]
-#             x = x_group[i]
-#             for j in 1:yn
-#                 if y_exists[j]
-#                     y = y_group[j]
-#                     @inline d2 = distSqr(x, y)
-#                     if d2 ≤ cutoff_sqr
-#                         @inline output = f(x, y, i, j, d2, output)
-#                     end
-#                 end
-#             end
-#         end
-#     end
-#     return output
-# end
+    function f(x,y,i,j,d2,output)
+        # update output
+        return output
+    end
+"""
+function mapElementsElements!(
+        f, 
+        output, 
+        m::Painter, 
+        x_groupid::Integer, 
+        x_elementstype::Type{Simplex{N}}, 
+        y_groupid::Integer, 
+        y_elementstype::Type{Simplex{M}}, 
+        cutoff::Float32,
+    ) where {N, M}
+    # loop through all element in groupid
+    # and call mapSimplexElements! with extra optional parameters
+    x_group = m.data[N][x_groupid]
+    x_exists = m.exists[N][x_groupid]
+    x_n = length(x_group)
+    # TODO figure out a heuristic for which group to iterate first.
+    # Or just leave that to the caller.
+    for i in Int32(1):Int32(x_n)
+        if x_exists[i]
+            x = x_group[i]
+            in_x = (x .* m.voxel_length) .+ (m.grid_start,)
+            output = mapSimplexElements!(f, output, m, y_groupid, in_x, y_elementstype, cutoff;
+                i,
+                x,
+            )
+        end
+    end
+    return output
+end

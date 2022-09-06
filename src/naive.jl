@@ -132,7 +132,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapPairElementsElements!(
+function mapElementsElements!(
         f, 
         output, 
         m::Naive, 
