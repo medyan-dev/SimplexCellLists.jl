@@ -5,7 +5,7 @@ This implementation is based on the idea in https://gitlab.com/f-nedelec/cytosim
 And in figure 10 of "Francois Nedelec and Dietrich Foethke 2007 New J. Phys. 9 427"
 to paint a grid with elements based on a maximum range.
 """
-struct Painter <: MultiShapeCellList
+struct Painter <: SimplexCellList
     grid_start::SVector{3,Float32}
 
     grid_size::SVector{3,Int32}

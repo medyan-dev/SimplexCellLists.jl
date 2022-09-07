@@ -3,9 +3,9 @@
 
 
 """
-A simple `MultiShapeCellList` with no extra options that uses double for loops.
+A simple `SimplexCellList` with no extra options that uses double for loops.
 """
-struct Naive <: MultiShapeCellList
+struct Naive <: SimplexCellList
     data::Tuple{Vector{Vector{Point}}, Vector{Vector{Line}}}
 
     "true if element exists"
@@ -24,7 +24,7 @@ end
 """
 Set the elements stored in the cell list.
 """
-function setElements!(m::Naive, points, lines)
+function setElements!(m::Naive, points, lines)::Nothing
     @argcheck length(points) == length(m.data[1])
     @argcheck length(lines) == length(m.data[2])
     in_data_tuple = (points, lines,)
@@ -39,6 +39,7 @@ function setElements!(m::Naive, points, lines)
             groupexists .= true
         end
     end
+    return
 end
 
 """
