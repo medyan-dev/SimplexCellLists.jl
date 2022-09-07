@@ -118,7 +118,7 @@ end
 """
 Set the elements stored in the cell list.
 """
-function setElements(m::Painter, points, lines)
+function setElements!(m::Painter, points, lines)
     @argcheck length(points) == length(m.data[1])
     @argcheck length(lines) == length(m.data[2])
     in_data_tuple = (points, lines,)
@@ -155,7 +155,7 @@ end
 """
 add a simplex, return the simplex id.
 """
-function addElement(m::Painter, groupid::Integer, element::Simplex{N})::Int32 where {N}
+function addElement!(m::Painter, groupid::Integer, element::Simplex{N})::Int32 where {N}
     x = (element .- (m.grid_start,)) .* m.inv_voxel_length
     group = push!(m.data[N][groupid], x)
     push!(m.exists[N][groupid], true)
@@ -167,7 +167,7 @@ end
 """
 delete an element, the other element ids are stable.
 """
-function deleteElement(m::Painter, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing where {N} 
+function deleteElement!(m::Painter, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing where {N} 
     m.exists[N][groupid][elementid] = false
     return
 end
@@ -218,7 +218,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapSimplexElements!(
+function mapSimplexElements(
         f, 
         output, 
         m::Painter, 
@@ -235,7 +235,7 @@ function mapSimplexElements!(
 end
 
 #point to other
-function mapSimplexElements!(
+function mapSimplexElements(
         f, 
         output, 
         m::Painter, 
@@ -285,7 +285,7 @@ function mapSimplexElements!(
 end
 
 #line to other
-function mapSimplexElements!(
+function mapSimplexElements(
         f, 
         output, 
         m::Painter, 
@@ -407,9 +407,9 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVect
         return output
     end
 """
-function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
+function mapPairElements(f, output, m::Painter, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
     # loop through all element in groupid
-    # and call mapSimplexElements! with extra optional parameters
+    # and call mapSimplexElements with extra optional parameters
     # to only run on elements with id > i, to avoid double counting
     group = m.data[N][groupid]
     exists = m.exists[N][groupid]
@@ -418,7 +418,7 @@ function mapPairElements!(f, output, m::Painter, groupid::Integer, elementstype:
         if exists[i]
             x = group[i]
             in_x = (x .* m.voxel_length) .+ (m.grid_start,)
-            output = mapSimplexElements!(f, output, m, groupid, in_x, elementstype, cutoff;
+            output = mapSimplexElements(f, output, m, groupid, in_x, elementstype, cutoff;
                 i,
                 filterj = >(i),
                 x,
@@ -440,7 +440,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapElementsElements!(
+function mapElementsElements(
         f, 
         output, 
         m::Painter, 
@@ -451,7 +451,7 @@ function mapElementsElements!(
         cutoff::Float32,
     ) where {N, M}
     # loop through all element in groupid
-    # and call mapSimplexElements! with extra optional parameters
+    # and call mapSimplexElements with extra optional parameters
     x_group = m.data[N][x_groupid]
     x_exists = m.exists[N][x_groupid]
     x_n = length(x_group)
@@ -461,7 +461,7 @@ function mapElementsElements!(
         if x_exists[i]
             x = x_group[i]
             in_x = (x .* m.voxel_length) .+ (m.grid_start,)
-            output = mapSimplexElements!(f, output, m, y_groupid, in_x, y_elementstype, cutoff;
+            output = mapSimplexElements(f, output, m, y_groupid, in_x, y_elementstype, cutoff;
                 i,
                 x,
             )

@@ -19,16 +19,16 @@ Random.seed!(1234)
         voxel_length= 1/10,
         max_range= SA[[0.1],Float64[]],
     )
-    SimplexCellLists.setElements(naive,[points],[])
-    SimplexCellLists.setElements(painter,[points],[])
-    SimplexCellLists.addElement(naive,1,points[1])
-    SimplexCellLists.addElement(painter,1,points[1])
+    SimplexCellLists.setElements!(naive,[points],[])
+    SimplexCellLists.setElements!(painter,[points],[])
+    SimplexCellLists.addElement!(naive,1,points[1])
+    SimplexCellLists.addElement!(painter,1,points[1])
     delid = rand(1:(N+1))
-    SimplexCellLists.deleteElement(painter, 1, delid, SimplexCellLists.Point)
-    SimplexCellLists.deleteElement(naive, 1, delid, SimplexCellLists.Point)
+    SimplexCellLists.deleteElement!(painter, 1, delid, SimplexCellLists.Point)
+    SimplexCellLists.deleteElement!(naive, 1, delid, SimplexCellLists.Point)
     cutoff = 0.09f0
     f(x,y,i,j,d2,output) = output+((√(d2)-cutoff)^2)
-    naive_out = SimplexCellLists.mapSimplexElements!(
+    naive_out = SimplexCellLists.mapSimplexElements(
         f,
         0.0,
         naive,
@@ -37,7 +37,7 @@ Random.seed!(1234)
         SimplexCellLists.Point,
         cutoff,
     )
-    painter_out = SimplexCellLists.mapSimplexElements!(
+    painter_out = SimplexCellLists.mapSimplexElements(
         f,
         0.0,
         painter,
@@ -61,14 +61,14 @@ end
             voxel_length= 1/10,
             max_range= SA[Float64[],Float64[0.1]],
         )
-        SimplexCellLists.setElements(naive,[],[lines])
-        SimplexCellLists.setElements(painter,[],[lines])
-        SimplexCellLists.addElement(naive,1,lines[1])
-        SimplexCellLists.addElement(painter,1,lines[1])
+        SimplexCellLists.setElements!(naive,[],[lines])
+        SimplexCellLists.setElements!(painter,[],[lines])
+        SimplexCellLists.addElement!(naive,1,lines[1])
+        SimplexCellLists.addElement!(painter,1,lines[1])
         push!(lines,lines[1])
         delid = rand(eachindex(lines))
-        SimplexCellLists.deleteElement(painter, 1, delid, SimplexCellLists.Line)
-        SimplexCellLists.deleteElement(naive, 1, delid, SimplexCellLists.Line)
+        SimplexCellLists.deleteElement!(painter, 1, delid, SimplexCellLists.Line)
+        SimplexCellLists.deleteElement!(naive, 1, delid, SimplexCellLists.Line)
         cutoff = 0.09f0
         function f!(x,y,i,j,d2,output)
             d2 = SimplexCellLists.distSqr(lines[1], lines[j])
@@ -77,7 +77,7 @@ end
             end
             output
         end
-        naive_out = SimplexCellLists.mapSimplexElements!(
+        naive_out = SimplexCellLists.mapSimplexElements(
             f!,
             zeros(length(lines)),
             naive,
@@ -86,7 +86,7 @@ end
             SimplexCellLists.Line,
             cutoff,
         )
-        painter_out = SimplexCellLists.mapSimplexElements!(
+        painter_out = SimplexCellLists.mapSimplexElements(
             f!,
             zeros(length(lines)),
             painter,
@@ -112,12 +112,12 @@ end
             voxel_length= 1/10,
             max_range= SA[Float64[0.1],Float64[0.1]],
         )
-        SimplexCellLists.setElements(naive,[points],[lines])
-        SimplexCellLists.setElements(painter,[points],[lines])
-        SimplexCellLists.addElement(naive,1,lines[1])
-        SimplexCellLists.addElement(painter,1,lines[1])
-        SimplexCellLists.addElement(naive,1,points[1])
-        SimplexCellLists.addElement(painter,1,points[1])
+        SimplexCellLists.setElements!(naive,[points],[lines])
+        SimplexCellLists.setElements!(painter,[points],[lines])
+        SimplexCellLists.addElement!(naive,1,lines[1])
+        SimplexCellLists.addElement!(painter,1,lines[1])
+        SimplexCellLists.addElement!(naive,1,points[1])
+        SimplexCellLists.addElement!(painter,1,points[1])
         push!(lines,lines[1])
         push!(points,points[1])
         cutoff = 0.1f0
@@ -135,7 +135,7 @@ end
             end
             output
         end
-        pointline_naive_out = SimplexCellLists.mapSimplexElements!(
+        pointline_naive_out = SimplexCellLists.mapSimplexElements(
             pointline_f!,
             zeros(length(lines)),
             naive,
@@ -144,7 +144,7 @@ end
             SimplexCellLists.Line,
             cutoff,
         )
-        linepoint_naive_out = SimplexCellLists.mapSimplexElements!(
+        linepoint_naive_out = SimplexCellLists.mapSimplexElements(
             linepoint_f!,
             zeros(length(points)),
             naive,
@@ -153,7 +153,7 @@ end
             SimplexCellLists.Point,
             cutoff,
         )
-        pointline_painter_out = SimplexCellLists.mapSimplexElements!(
+        pointline_painter_out = SimplexCellLists.mapSimplexElements(
             pointline_f!,
             zeros(length(lines)),
             painter,
@@ -162,7 +162,7 @@ end
             SimplexCellLists.Line,
             cutoff,
         )
-        linepoint_painter_out = SimplexCellLists.mapSimplexElements!(
+        linepoint_painter_out = SimplexCellLists.mapSimplexElements(
             linepoint_f!,
             zeros(length(points)),
             painter,
@@ -188,11 +188,11 @@ end
     diag_l = norm(diag)
     diag_hat = normalize(diag)
     point = 1//2*diag - (SimplexCellLists.MAX_SAMPLE_SPACING + cutoff)*diag_hat
-    SimplexCellLists.addElement(painter,1,SA[point])
+    SimplexCellLists.addElement!(painter,1,SA[point])
     line_a = point + 0.9f0*cutoff*diag_hat
     line_b = line_a + 2*SimplexCellLists.MAX_SAMPLE_SPACING*diag_hat
     f(x,y,i,j,d2,output) = output + 1
-    out = SimplexCellLists.mapSimplexElements!(
+    out = SimplexCellLists.mapSimplexElements(
         f,
         0,
         painter,
@@ -216,11 +216,11 @@ end
     diag_l = norm(diag)
     diag_hat = normalize(diag)
     point = 1//2*diag - (SimplexCellLists.MAX_SAMPLE_SPACING-0.001f0 + cutoff-0.001f0)*diag_hat
-    SimplexCellLists.addElement(painter,1,SA[point])
+    SimplexCellLists.addElement!(painter,1,SA[point])
     line_a = 1//2*diag - (SimplexCellLists.MAX_SAMPLE_SPACING-0.001f0)*diag_hat
     line_b = line_a + 1.9999f0*SimplexCellLists.MAX_SAMPLE_SPACING*diag_hat
     f(x,y,i,j,d2,output) = output + 1
-    out = SimplexCellLists.mapSimplexElements!(
+    out = SimplexCellLists.mapSimplexElements(
         f,
         0,
         painter,
@@ -244,11 +244,11 @@ end
     diag_l = norm(diag)
     diag_hat = normalize(diag)
     point = 1//2*diag - (SimplexCellLists.MAX_SAMPLE_SPACING-0.001f0 + cutoff-0.001f0)*diag_hat
-    SimplexCellLists.addElement(painter,1,SA[point])
+    SimplexCellLists.addElement!(painter,1,SA[point])
     line_a = 1//2*diag - (SimplexCellLists.MAX_SAMPLE_SPACING-0.001f0)*diag_hat
     line_b = line_a + 2.1f0*SimplexCellLists.MAX_SAMPLE_SPACING*diag_hat
     f(x,y,i,j,d2,output) = output + 1
-    out = SimplexCellLists.mapSimplexElements!(
+    out = SimplexCellLists.mapSimplexElements(
         f,
         0,
         painter,
@@ -272,11 +272,11 @@ end
     diag_l = norm(diag)
     diag_hat = normalize(diag)
     point = 1//2*diag - (SimplexCellLists.MAX_SAMPLE_SPACING-0.001f0 + cutoff-0.001f0)*diag_hat
-    SimplexCellLists.addElement(painter,1,SA[point])
+    SimplexCellLists.addElement!(painter,1,SA[point])
     line_a = 1//2*diag - (SimplexCellLists.MAX_SAMPLE_SPACING-0.001f0)*diag_hat
     line_b = line_a - 2.1f0*SimplexCellLists.MAX_SAMPLE_SPACING*diag_hat
     f(x,y,i,j,d2,output) = output + 1
-    out = SimplexCellLists.mapSimplexElements!(
+    out = SimplexCellLists.mapSimplexElements(
         f,
         0,
         painter,
@@ -299,9 +299,9 @@ end
     x = SA_F32[1,0,0]
     y = SA_F32[0,1,0]
     z = SA_F32[0,0,1]
-    SimplexCellLists.addElement(painter,1,SA[-100x, 100x])
+    SimplexCellLists.addElement!(painter,1,SA[-100x, 100x])
     f(x,y,i,j,d2,output) = output + 1
-    out = SimplexCellLists.mapSimplexElements!(
+    out = SimplexCellLists.mapSimplexElements(
         f,
         0,
         painter,
@@ -324,9 +324,9 @@ end
     x = SA_F32[1,0,0]
     y = SA_F32[0,1,0]
     z = SA_F32[0,0,1]
-    SimplexCellLists.addElement(painter,1,SA[-100x, 100x])
+    SimplexCellLists.addElement!(painter,1,SA[-100x, 100x])
     f(x,y,i,j,d2,output) = output + 1
-    out = SimplexCellLists.mapSimplexElements!(
+    out = SimplexCellLists.mapSimplexElements(
         f,
         0,
         painter,
@@ -349,9 +349,9 @@ end
     x = SA_F32[1,0,0]
     y = SA_F32[0,1,0]
     z = SA_F32[0,0,1]
-    SimplexCellLists.addElement(painter,1,SA[-100x])
+    SimplexCellLists.addElement!(painter,1,SA[-100x])
     f123(x,y,i,j,d2,output) = output + 1
-    out = SimplexCellLists.mapSimplexElements!(
+    out = SimplexCellLists.mapSimplexElements(
         f123,
         0,
         painter,
@@ -375,17 +375,17 @@ end
             voxel_length= 1/10,
             max_range= SA[Float64[0.1],Float64[0.1]],
         )
-        SimplexCellLists.setElements(naive,[points],[lines])
-        SimplexCellLists.setElements(painter,[points],[lines])
-        SimplexCellLists.addElement(naive,1,lines[1])
-        SimplexCellLists.addElement(painter,1,lines[1])
-        SimplexCellLists.addElement(naive,1,points[1])
-        SimplexCellLists.addElement(painter,1,points[1])
+        SimplexCellLists.setElements!(naive,[points],[lines])
+        SimplexCellLists.setElements!(painter,[points],[lines])
+        SimplexCellLists.addElement!(naive,1,lines[1])
+        SimplexCellLists.addElement!(painter,1,lines[1])
+        SimplexCellLists.addElement!(naive,1,points[1])
+        SimplexCellLists.addElement!(painter,1,points[1])
         push!(lines,lines[1])
         push!(points,points[1])
         delid = rand(eachindex(lines))
-        SimplexCellLists.deleteElement(painter, 1, delid, SimplexCellLists.Line)
-        SimplexCellLists.deleteElement(naive, 1, delid, SimplexCellLists.Line)
+        SimplexCellLists.deleteElement!(painter, 1, delid, SimplexCellLists.Line)
+        SimplexCellLists.deleteElement!(naive, 1, delid, SimplexCellLists.Line)
         cutoff = 0.1f0
         #@show trial
         function LLf!(x,y,i,j,d2,output)
@@ -412,7 +412,7 @@ end
             end
             output
         end
-        naive_out_LL = SimplexCellLists.mapPairElements!(
+        naive_out_LL = SimplexCellLists.mapPairElements(
             LLf!,
             zeros(length(lines),length(lines)),
             naive,
@@ -420,7 +420,7 @@ end
             SimplexCellLists.Line,
             cutoff,
         )
-        painter_out_LL = SimplexCellLists.mapPairElements!(
+        painter_out_LL = SimplexCellLists.mapPairElements(
             LLf!,
             zeros(length(lines),length(lines)),
             painter,
@@ -429,7 +429,7 @@ end
             cutoff,
         )
 
-        naive_out_PP = SimplexCellLists.mapPairElements!(
+        naive_out_PP = SimplexCellLists.mapPairElements(
             PPf!,
             zeros(length(points),length(points)),
             naive,
@@ -437,7 +437,7 @@ end
             SimplexCellLists.Point,
             cutoff,
         )
-        painter_out_PP = SimplexCellLists.mapPairElements!(
+        painter_out_PP = SimplexCellLists.mapPairElements(
             PPf!,
             zeros(length(points),length(points)),
             painter,
@@ -446,7 +446,7 @@ end
             cutoff,
         )
 
-        naive_out_LP = SimplexCellLists.mapElementsElements!(
+        naive_out_LP = SimplexCellLists.mapElementsElements(
             LPf!,
             zeros(length(lines),length(points)),
             naive,
@@ -456,7 +456,7 @@ end
             SimplexCellLists.Point,
             cutoff,
         )
-        painter_out_LP = SimplexCellLists.mapElementsElements!(
+        painter_out_LP = SimplexCellLists.mapElementsElements(
             LPf!,
             zeros(length(lines),length(points)),
             painter,

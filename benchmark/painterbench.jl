@@ -9,7 +9,7 @@ function run1(celllist, points)
         output+((√(d2)-0.09f0)^2)
     end
     sum(points) do point
-        SimplexCellLists.mapSimplexElements!(
+        SimplexCellLists.mapSimplexElements(
             f,
             0.0,
             celllist,
@@ -24,7 +24,7 @@ end
 function run2(celllist, point)
     cutoff = 0.09f0
     f(x,y,i,j,d2,output) = output+((√(d2)-cutoff)^2)
-    SimplexCellLists.mapSimplexElements!(
+    SimplexCellLists.mapSimplexElements(
         f,
         0.0,
         celllist,
@@ -47,7 +47,7 @@ painter = SimplexCellLists.Painter(1,0;
     voxel_length= 1/10,
     max_range= SA[[0.1],Float64[]],
 )
-SimplexCellLists.setElements(naive,[points],[])
-SimplexCellLists.setElements(painter,[points],[])
+SimplexCellLists.setElements!(naive,[points],[])
+SimplexCellLists.setElements!(painter,[points],[])
 @btime run1(painter, otherpoints)
 @btime run2(painter, otherpoints[1])

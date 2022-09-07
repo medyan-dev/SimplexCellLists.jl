@@ -36,9 +36,9 @@ function run1(cylinders)
         max_range= SA[Float64[],[226.0]],
     )
     naive = SimplexCellLists.Naive(0, 1)
-    # SimplexCellLists.setElements(naive,[cylinders],[])
-    SimplexCellLists.setElements(painter,[],[cylinders])
-    SimplexCellLists.mapPairElements!(f, output, painter, 1, SimplexCellLists.Line, 225.0f0)
+    # SimplexCellLists.setElements!(naive,[cylinders],[])
+    SimplexCellLists.setElements!(painter,[],[cylinders])
+    SimplexCellLists.mapPairElements(f, output, painter, 1, SimplexCellLists.Line, 225.0f0)
 end
 
 function run1(cylinders)
@@ -50,11 +50,11 @@ function run1(cylinders)
         max_range= SA[Float64[],[226.0]],
     )
     #naive = SimplexCellLists.Naive(0, 1)
-    #SimplexCellLists.setElements(naive,[],[cylinders])
-    SimplexCellLists.setElements(
+    #SimplexCellLists.setElements!(naive,[],[cylinders])
+    SimplexCellLists.setElements!(
         painter,
         Vector{SimplexCellLists.Point}[],
         Vector{SimplexCellLists.Line}[cylinders])
-    SimplexCellLists.mapPairElements!(f, 0, painter, 1, SimplexCellLists.Line, 225.0f0)
-    #SimplexCellLists.mapPairElements!(f, output, naive, 1, SimplexCellLists.Line, 225.0f0)
+    SimplexCellLists.mapPairElements(f, 0, painter, 1, SimplexCellLists.Line, 225.0f0)
+    #SimplexCellLists.mapPairElements(f, output, naive, 1, SimplexCellLists.Line, 225.0f0)
 end

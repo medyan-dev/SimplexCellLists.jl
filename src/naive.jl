@@ -24,7 +24,7 @@ end
 """
 Set the elements stored in the cell list.
 """
-function setElements(m::Naive, points, lines)
+function setElements!(m::Naive, points, lines)
     @argcheck length(points) == length(m.data[1])
     @argcheck length(lines) == length(m.data[2])
     in_data_tuple = (points, lines,)
@@ -44,7 +44,7 @@ end
 """
 add a simplex, return the simplex id.
 """
-function addElement(m::Naive, groupid::Integer, element::Simplex{N})::Int32 where {N}
+function addElement!(m::Naive, groupid::Integer, element::Simplex{N})::Int32 where {N}
     group = push!(m.data[N][groupid],element)
     push!(m.exists[N][groupid], true)
     return length(group)
@@ -53,7 +53,7 @@ end
 """
 delete an element, the other element ids are stable.
 """
-function deleteElement(m::Naive, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing where {N}
+function deleteElement!(m::Naive, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing where {N}
     m.exists[N][groupid][elementid] = false
     return
 end
@@ -71,7 +71,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapSimplexElements!(f, output, m::Naive, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
+function mapSimplexElements(f, output, m::Naive, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
     # just loop through all element in groupid
     group = m.data[M][groupid]
     exists = m.exists[M][groupid]
@@ -99,7 +99,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVect
         return output
     end
 """
-function mapPairElements!(f, output, m::Naive, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
+function mapPairElements(f, output, m::Naive, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
     # just double loop through all element in groupid
     cutoff_sqr = cutoff^2
     group = m.data[N][groupid]
@@ -134,7 +134,7 @@ Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVect
         return output
     end
 """
-function mapElementsElements!(
+function mapElementsElements(
         f, 
         output, 
         m::Naive, 
