@@ -22,7 +22,7 @@ distSqr_sMin(x::Line, y::Point)  = ((i -> (i[1], SA_F32[i[2]])) ∘ dist2PointLi
 distSqr_sMin(x::Line, y::Line)   = ((i -> (i[1], SA_F32[i[2]])) ∘ dist2LineLine_s_t)( x, y)
 
 """
-Abstract type for all MultiShapeCellList implementations.
+Abstract type for all SimplexCellList implementations.
 
 Implementations must have a constructor with signature like
 
@@ -32,7 +32,7 @@ Fields of implementations are not part of the the interface.
 
 
 """
-abstract type MultiShapeCellList end
+abstract type SimplexCellList end
 
 include("naive.jl")
 include("painter.jl")

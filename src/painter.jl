@@ -445,9 +445,9 @@ function mapElementsElements(
         output, 
         m::Painter, 
         x_groupid::Integer, 
-        x_elementstype::Type{Simplex{N}}, 
+        x_type::Type{Simplex{N}}, 
         y_groupid::Integer, 
-        y_elementstype::Type{Simplex{M}}, 
+        y_type::Type{Simplex{M}}, 
         cutoff::Float32,
     ) where {N, M}
     # loop through all element in groupid
@@ -461,7 +461,7 @@ function mapElementsElements(
         if x_exists[i]
             x = x_group[i]
             in_x = (x .* m.voxel_length) .+ (m.grid_start,)
-            output = mapSimplexElements(f, output, m, y_groupid, in_x, y_elementstype, cutoff;
+            output = mapSimplexElements(f, output, m, y_groupid, in_x, y_type, cutoff;
                 i,
                 x,
             )

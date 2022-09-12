@@ -364,16 +364,16 @@ end
 end
 
 @testset "map pairs" begin
-    for trial in 1:10
+    for trial in 1:20
         N = 1000
-        lines = rand(SVector{2,SVector{3,Float32}},N)
-        points = rand(SVector{1,SVector{3,Float32}},N)
+        lines = trial .* rand(SVector{2,SVector{3,Float32}},N)
+        points = trial .* rand(SVector{1,SVector{3,Float32}},N)
         naive = SimplexCellLists.Naive(1, 1)
         painter = SimplexCellLists.Painter(1, 1;
             grid_start= SA[0.0,0.0,0.0],
             grid_size= SA[10,10,10],
-            voxel_length= 1/10,
-            max_range= SA[Float64[0.1],Float64[0.1]],
+            voxel_length= trial*1/10,
+            max_range= SA[Float64[trial*0.1],Float64[trial*0.1]],
         )
         SimplexCellLists.setElements!(naive,[points],[lines])
         SimplexCellLists.setElements!(painter,[points],[lines])
@@ -386,7 +386,7 @@ end
         delid = rand(eachindex(lines))
         SimplexCellLists.deleteElement!(painter, 1, delid, SimplexCellLists.Line)
         SimplexCellLists.deleteElement!(naive, 1, delid, SimplexCellLists.Line)
-        cutoff = 0.1f0
+        cutoff = trial*0.099f0
         #@show trial
         function LLf!(x,y,i,j,d2,output)
             d2 = SimplexCellLists.distSqr(lines[i], lines[j])

@@ -11,12 +11,12 @@ However, there is no support for periodic boundary conditions, 2D systems, or ty
 See [CellListMap.jl](https://github.com/m3g/CellListMap.jl) if you want these features, or higher performance on systems without triangles and line segments.
 
 
-## API
+## Setup
 
 - `Simplex{N}` is `SVector{N, SVector{3, Float32}}`
-- `Point` is `SVector{1, SVector{3, Float32}}`
-- `Line` is `SVector{2, SVector{3, Float32}}`
-- `Triangle` is `SVector{3, SVector{3, Float32}}`
+- `Point` is `Simplex{1}`
+- `Line` is `Simplex{2}`
+- `Triangle` is `Simplex{3}`
 
 There are multiple algorithms that implement the `SimplexCellList` abstract type interface.
 Currently:
@@ -26,7 +26,7 @@ Currently:
 Let `T` be a concrete subtype of `SimplexCellList`
 
 ### Constructor
-`T` can be constructed with:
+Construct `T`:
 
 ```julia
 T(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroups::Integer; kwargs...)::T
@@ -38,33 +38,114 @@ and `numtrianglegroups` is the number of groups of triangles.
 `kwargs` are options specific for `T`
 
 ### `setElements!`
-The elements stored in `T` can be reset in batch with:
+Reset the elements stored in `T` in batch:
 
 ```julia
 setElements!(m::T, points, lines, triangles)::Nothing
 ```
 
-Where `points`, `lines` and `triangles` are iterators with `length` of the number of groups of each type. Each iterates to get containers of objects convertible to 
+Where `points`, `lines` and `triangles` are collections of collections of objects convertible to 
 `Point`, `Line`, and `Triangle` respectively.
-Added elements will have a group id and element id based on the order of the inputs.
-Ids are one based.
+
+Added elements will have a group ID and element ID based on the order of the inputs.
+The first group in each type has group ID 1, and the first element in each group has element ID 1.
 
 ### `addElement!`
-A new element can be added to `T` with:
+Add a new element to `T`, and return its element ID:
 
 ```julia
 addElement!(m::T, groupid::Integer, element::Simplex{N})::Int32
 ```
-The new element id is returned.
+The new element will be pushed to the end of the specified group.
 
-
-### `deleteElement!`
-An existing element can be deleted from `T` with:
+### `deactivate!`
+Deactivate an existing element in `T`
 
 ```julia
-SimplexCellLists.deleteElement!(m::T, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Int32
+deactivate!(m::T, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing
 ```
-The other element ids are stable when elements are deleted. To avoid performance issues, with holes, use `setElements!` if you are removing a significant fraction of the elements, to make the ids contiguous again.
+Inactive elements are not mapped over. Elements are active by default.
 
+### `activate!`
+Re-activate an existing element in `T`
+
+```julia
+activate!(m::T, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing
+```
+Inactive elements are not mapped over. Elements are active by default.
+
+### `isActive`
+Return if an existing element in `T` is active.
+
+```julia
+isActive(m::T, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Bool
+```
+Inactive elements are not mapped over. Elements are active by default.
+
+## Mapping
+
+The following functions allow mapping a custom function over pairs of simplexes within some cutoff.
+
+### Mapped function `f`
+
+The function f should have the same form as used in CellListMap.jl
+Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
+
+```julia
+    function f(x,y,i,j,d2,output)
+        # update output
+        return output
+    end
+```
+
+The order in which pairs of elements in range are mapped is implementation dependent.
+
+The elements passed to `f` may be slightly different from the elements added to `T` due to implementation dependent floating point rounding errors.
+
+If a pair distance is very near the cutoff, it is implementation dependent whether the pair gets mapped or not due to floating point rounding errors.
+
+Therefore, if more precision is needed, add some extra distance to the cutoff, store the elements externally in 64 bit precision, and in `f` use `i` and `j` to get the precise elements and again check distances.
 
 ### `mapSimplexElements`
+
+Apply function `f` to all elements in group `groupid` within the cutoff range of `x`, and
+return the output of the final `f` call.
+
+```julia
+mapSimplexElements(f, output, m::T, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
+```
+
+`x` is always `x` and `i` is always 0, in calls to `f`.
+
+### `mapPairElements`
+
+Apply function `f` to all unordered pairs of elements in group `groupid` within cutoff range, and return the output of the final `f` call.
+
+```julia
+mapPairElements(f, output, m::T, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
+```
+
+`f` is never called more than once per unordered pair. Which element is `x` and `y` in calls to `f` is implementation dependent.
+
+
+### `mapElementsElements`
+
+Apply function `f` to each pair of elements from two different groups that are within cutoff range of each other, and return the output of the final `f` call.
+
+
+```julia
+mapElementsElements(
+        f, 
+        output, 
+        m::T, 
+        x_groupid::Integer, 
+        x_type::Type{Simplex{N}}, 
+        y_groupid::Integer, 
+        y_type::Type{Simplex{M}}, 
+        cutoff::Float32,
+    ) where {N, M}
+```
+
+The first element has is an `x_type` in group `x_groupid` and the second element is a `y_type` in group `y_groupid`.
+
+`f` is never called more than once per pair.

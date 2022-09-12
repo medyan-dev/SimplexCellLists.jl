@@ -140,11 +140,12 @@ function mapElementsElements(
         output, 
         m::Naive, 
         x_groupid::Integer, 
-        x_elementstype::Type{Simplex{N}}, 
+        x_type::Type{Simplex{N}}, 
         y_groupid::Integer, 
-        y_elementstype::Type{Simplex{M}}, 
-        cutoff_sqr::Float32,
+        y_type::Type{Simplex{M}}, 
+        cutoff::Float32,
     ) where {N, M}
+    cutoff_sqr = cutoff^2
     # just double loop through all element in groupid
     x_group = m.data[N][x_groupid]
     x_exists = m.exists[N][x_groupid]
