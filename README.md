@@ -47,14 +47,16 @@ setElements!(m::T, points, lines, triangles)::Nothing
 Where `points`, `lines` and `triangles` are collections of collections of objects convertible to 
 `Point`, `Line`, and `Triangle` respectively.
 
-Added elements will have a group ID and element ID based on the order of the inputs.
-The first group in each type has group ID 1, and the first element in each group has element ID 1.
+For example, each collection in `points` is a group of points that can be mapped over independently from, or together with, other groups.
+
+Added elements will have a group index and element index based on the order of the inputs.
+The first group in each type has group index 1, and the first element in each group has element index 1.
 
 ### `addElement!`
-Add a new element to `T`, and return its element ID:
+Add a new element to `T`, and return its element index:
 
 ```julia
-addElement!(m::T, groupid::Integer, element::Simplex{N})::Int32
+addElement!(m::T, groupidx::Integer, element::Simplex{N})::Int32
 ```
 The new element will be pushed to the end of the specified group.
 
@@ -62,7 +64,7 @@ The new element will be pushed to the end of the specified group.
 Deactivate an existing element in `T`
 
 ```julia
-deactivate!(m::T, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing
+deactivate!(m::T, groupidx::Integer, elementidx::Integer, elementtype::Type{Simplex{N}})::Nothing
 ```
 Inactive elements are not mapped over. Elements are active by default.
 
@@ -70,7 +72,7 @@ Inactive elements are not mapped over. Elements are active by default.
 Re-activate an existing element in `T`
 
 ```julia
-activate!(m::T, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Nothing
+activate!(m::T, groupidx::Integer, elementidx::Integer, elementtype::Type{Simplex{N}})::Nothing
 ```
 Inactive elements are not mapped over. Elements are active by default.
 
@@ -78,7 +80,7 @@ Inactive elements are not mapped over. Elements are active by default.
 Return if an existing element in `T` is active.
 
 ```julia
-isActive(m::T, groupid::Integer, elementid::Integer, elementtype::Type{Simplex{N}})::Bool
+isActive(m::T, groupidx::Integer, elementidx::Integer, elementtype::Type{Simplex{N}})::Bool
 ```
 Inactive elements are not mapped over. Elements are active by default.
 
@@ -88,8 +90,13 @@ The following functions allow mapping a custom function over pairs of simplexes 
 
 ### Mapped function `f`
 
-The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
+The function f should have the same form as used in CellListMap.jl.
+
+`i` is the element index of simplex `x`, `j` is the element index of simplex `y`. 
+
+`d2` is an approximate `Float32` squared distance between `x` and `y`.
+
+Except here `x` and `y` are `Simplex{N}`, `Simplex{M}`
 
 ```julia
     function f(x,y,i,j,d2,output)
@@ -108,44 +115,47 @@ Therefore, if more precision is needed, add some extra distance to the cutoff, s
 
 ### `mapSimplexElements`
 
-Apply function `f` to all elements in group `groupid` within the cutoff range of `x`, and
-return the output of the final `f` call.
+Map `f` to all simplexes in a group close to a single simplex.
 
 ```julia
-mapSimplexElements(f, output, m::T, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
+mapSimplexElements(f, output, m::T, groupidx::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
 ```
+
+Apply function `f` to all elements in group `groupidx` within the cutoff range of the simplex `x`, and
+return the output of the final `f` call.
 
 `x` is always `x` and `i` is always 0, in calls to `f`.
 
 ### `mapPairElements`
 
-Apply function `f` to all unordered pairs of elements in group `groupid` within cutoff range, and return the output of the final `f` call.
+Map `f` to all pairs of nearby simplexes in a single group.
 
 ```julia
-mapPairElements(f, output, m::T, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
+mapPairElements(f, output, m::T, groupidx::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
 ```
+Apply function `f` to all unordered pairs of elements in group `groupidx` within cutoff range, and return the output of the final `f` call.
 
 `f` is never called more than once per unordered pair. Which element is `x` and `y` in calls to `f` is implementation dependent.
 
 
 ### `mapElementsElements`
 
-Apply function `f` to each pair of elements from two different groups that are within cutoff range of each other, and return the output of the final `f` call.
-
+Map `f` to all pairs of nearby simplexes between two different groups.
 
 ```julia
 mapElementsElements(
         f, 
         output, 
         m::T, 
-        x_groupid::Integer, 
+        x_groupidx::Integer, 
         x_type::Type{Simplex{N}}, 
-        y_groupid::Integer, 
+        y_groupidx::Integer, 
         y_type::Type{Simplex{M}}, 
         cutoff::Float32,
     ) where {N, M}
 ```
+Apply function `f` to each pair of elements from two different groups that are within cutoff range of each other, and return the output of the final `f` call.
 
-The first element has is an `x_type` in group `x_groupid` and the second element is a `y_type` in group `y_groupid`.
+The first element has is an `x_type` in group `x_groupidx` and the second element is a `y_type` in group `y_groupidx`.
 
 `f` is never called more than once per pair.
