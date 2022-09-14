@@ -1,4 +1,5 @@
 using LinearAlgebra
+using StaticArrays
 
 clamp01nan(x) = ifelse(isnan(x), zero(x), clamp(x,zero(x),one(x)))
 
@@ -16,7 +17,7 @@ function dist2PointLine_t(x,y)
 end
 
 function dist2PointLine(x,y)
-    dist2PointLine_t(x,y)[1]
+    @inline dist2PointLine_t(x,y)[1]
 end
 
 """
@@ -48,16 +49,17 @@ function dist2LineLine(x,y)
     e = Q ⋅ P0mQ0
     f = P0mQ0 ⋅ P0mQ0
     Δ = a*c - b^2
+    invΔ = inv(Δ)
     #assuming both segments are not zero length
     #critical points
     s0 = clamp01nan(-d/a)
     s1 = clamp01nan((b-d)/a)
     t0 = clamp01nan(e/c)
     t1 = clamp01nan((b+e)/c)
-    sbar = clamp01nan((b*e - c*d)/Δ)
-    tbar = clamp01nan((a*e - b*d)/Δ)
+    sbar = clamp01nan((b*e - c*d)*invΔ)
+    tbar = clamp01nan((a*e - b*d)*invΔ)
     r(s,t) = a*s^2 - 2b*s*t + c*t^2 + 2d*s - 2e*t
-    return max(0,f+min(
+    return Base.FastMath.max_fast(zero(s0),f+Base.FastMath.min_fast(
         r(s0,0),
         r(s1,1),
         r(0,t0),
@@ -130,4 +132,41 @@ function dist2LineLine_s_t(x,y)
     end
     d2cl = max(0,f+minr)
     return d2cl, mins, mint
+end
+
+
+function dist2PointTriangle(x,y)
+    P = x[1]
+    B = y[1]
+    E0= y[3] - B
+    E1= y[2] - B
+    BP = B - P
+    a = E0 ⋅ E0
+    b = E0 ⋅ E1
+    c = E1 ⋅ E1
+    d = E0 ⋅ BP
+    e = E1 ⋅ BP
+    f = BP ⋅ BP
+    Δ = a*c - b^2
+    invΔ = inv(Δ)
+    sbar = clamp01nan((b*e - c*d)*invΔ)
+    tbar = clamp01nan((-a*e + b*d)*invΔ)
+    
+    # # this ensures sbar and tbar are in the domain
+    # # if they are out of the domain, the min distance is on a boundary
+    outside = sbar+tbar > one(sbar)
+    sbar = ifelse(outside,zero(sbar),sbar)
+    tbar = ifelse(outside,zero(tbar),tbar)
+    s0 = clamp01nan(-d/a)
+    t0 = clamp01nan(-e/c)
+    sd = clamp01nan(-(b-c+d-e)/(a-2b+c))
+    td = one(sd) - sd
+    q(s,t) = a*s^2 + 2b*s*t + c*t^2 + 2d*s + 2e*t
+    
+    return Base.FastMath.max_fast(zero(sd),f + Base.FastMath.min_fast(
+        q(s0,0),
+        q(0,t0),
+        q(sd,td),
+        q(sbar,tbar),
+    ))
 end

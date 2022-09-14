@@ -44,3 +44,17 @@ b = rand(SVector{1,SVector{3,Float32}}, N)
 r = zeros(Float32, N)
 
 @btime dist2pointpointvect!($r,$a,$b)
+
+
+function dist2pointtrianglevect!(r,a,b)
+    @inbounds for i in eachindex(r, a, b)
+        @inline r[i] = SimplexCellLists.dist2PointTriangle(a[i],b[i])
+    end
+end
+
+N = 10000
+a = rand(SVector{1,SVector{3,Float32}}, N)
+b = rand(SVector{3,SVector{3,Float32}}, N)
+r = zeros(Float32, N)
+
+@btime dist2pointtrianglevect!($r,$a,$b)
