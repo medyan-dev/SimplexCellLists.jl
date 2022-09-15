@@ -88,16 +88,18 @@ end
     for i in 1:N
         ref_d2min = refDist2(a[i],b[i])
         d2min = SimplexCellLists.dist2PointTriangle(a[i],b[i])
-        # d2min_s_t, smin, tmin = SimplexCellLists.dist2LineLine_s_t(a[i],b[i])
-        # @test 0 ≤ d2min_s_t
-        # @test d2min ≈ d2min_s_t
-        # @test 0 ≤ d2min
+        d2min_s_t, tmin = SimplexCellLists.dist2PointTriangle_t(a[i],b[i])
+        @test 0 ≤ d2min_s_t
+        @test d2min ≈ d2min_s_t
+        @test 0 ≤ d2min
         @test ref_d2min ≈ d2min
-        # @test 0 ≤ tmin ≤ 1
-        # s_full = SA[1.0-smin, smin]
-        # t_full = SA[1.0-tmin, tmin]
-        # r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
-        # @test d2min ≈ r⋅r
+        @test 0 ≤ tmin[1]
+        @test 0 ≤ tmin[2]
+        @test sum(tmin) ≤ 1
+        s_full = SA[1.0]
+        t_full = SA[1.0-sum(tmin), tmin...]
+        r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
+        @test d2min ≈ r⋅r
     end
 end
 
@@ -126,10 +128,10 @@ end
     for i in 1:N
         ref_d2min = refDist2(a[i],b[i])
         d2min = SimplexCellLists.dist2LineTriangle(a[i],b[i])
-        # d2min_s_t, smin, tmin = SimplexCellLists.dist2LineLine_s_t(a[i],b[i])
-        # @test 0 ≤ d2min_s_t
-        # @test d2min ≈ d2min_s_t
-        # @test 0 ≤ d2min
+        d2min_s_t, smin, tmin = SimplexCellLists.dist2LineTriangle_s_t(a[i],b[i])
+        @test 0 ≤ d2min_s_t
+        @test d2min ≈ d2min_s_t atol = 1E-11
+        @test 0 ≤ d2min
         if abs(ref_d2min - d2min) > 1E-11
             @show abs(ref_d2min - d2min)
             @show d2min
@@ -139,11 +141,15 @@ end
             println()
         end
         @test ref_d2min ≈ d2min atol = 1E-11
-        # @test 0 ≤ tmin ≤ 1
-        # s_full = SA[1.0-smin, smin]
-        # t_full = SA[1.0-tmin, tmin]
-        # r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
-        # @test d2min ≈ r⋅r
+        @test 0 ≤ smin[1]
+        @test sum(smin) ≤ 1
+        @test 0 ≤ tmin[1]
+        @test 0 ≤ tmin[2]
+        @test sum(tmin) ≤ 1
+        s_full = SA[1.0-sum(smin), smin...]
+        t_full = SA[1.0-sum(tmin), tmin...]
+        r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
+        @test d2min ≈ r⋅r atol = 1E-11
     end
 end
 
@@ -154,15 +160,20 @@ end
     for i in 1:N
         ref_d2min = refDist2(a[i],b[i])
         d2min = SimplexCellLists.dist2TriangleTriangle(a[i],b[i])
-        # d2min_s_t, smin, tmin = SimplexCellLists.dist2LineLine_s_t(a[i],b[i])
-        # @test 0 ≤ d2min_s_t
-        # @test d2min ≈ d2min_s_t
-        # @test 0 ≤ d2min
+        d2min_s_t, smin, tmin = SimplexCellLists.dist2TriangleTriangle_s_t(a[i],b[i])
+        @test 0 ≤ d2min_s_t
+        @test d2min ≈ d2min_s_t atol = 1E-11
+        @test 0 ≤ d2min
         @test ref_d2min ≈ d2min atol = 1E-11
-        # @test 0 ≤ tmin ≤ 1
-        # s_full = SA[1.0-smin, smin]
-        # t_full = SA[1.0-tmin, tmin]
-        # r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
-        # @test d2min ≈ r⋅r
+        @test 0 ≤ smin[1]
+        @test 0 ≤ smin[2]
+        @test sum(smin) ≤ 1
+        @test 0 ≤ tmin[1]
+        @test 0 ≤ tmin[2]
+        @test sum(tmin) ≤ 1
+        s_full = SA[1.0-sum(smin), smin...]
+        t_full = SA[1.0-sum(tmin), tmin...]
+        r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
+        @test d2min ≈ r⋅r atol = 1E-11
     end
 end

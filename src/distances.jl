@@ -134,7 +134,18 @@ function dist2LineLine_s_t(x,y)
     return d2cl, mins, mint
 end
 
+"""
+Return the distance between a point and triangle in 3D.
 
+Based on https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
+But not fully optimized.
+// David Eberly, Geometric Tools, Redmond WA 98052
+// Copyright (c) 1998-2022
+// Distributed under the Boost Software License, Version 1.0.
+// https://www.boost.org/LICENSE_1_0.txt
+// https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
+// Version: 6.0.2022.01.06
+"""
 function dist2PointTriangle(x,y)
     P = x[1]
     B = y[1]
@@ -169,6 +180,74 @@ function dist2PointTriangle(x,y)
         q(sd,td),
         q(sbar,tbar),
     ))
+end
+
+"""
+Return the squared distance between a point and a triangle.
+And where on the triangle it occurs.
+
+(0,0) is at y[1]
+(1,0) is at y[2]
+(0,1) is at y[3]
+
+Based on https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
+But not fully optimized.
+// David Eberly, Geometric Tools, Redmond WA 98052
+// Copyright (c) 1998-2022
+// Distributed under the Boost Software License, Version 1.0.
+// https://www.boost.org/LICENSE_1_0.txt
+// https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
+// Version: 6.0.2022.01.06
+
+"""
+function dist2PointTriangle_t(x,y)
+    P = x[1]
+    B = y[1]
+    E0= y[2] - B
+    E1= y[3] - B
+    BP = B - P
+    a = E0 ⋅ E0
+    b = E0 ⋅ E1
+    c = E1 ⋅ E1
+    d = E0 ⋅ BP
+    e = E1 ⋅ BP
+    f = BP ⋅ BP
+    Δ = a*c - b^2
+    invΔ = inv(Δ)
+    sbar = clamp01nan((b*e - c*d)*invΔ)
+    tbar = clamp01nan((-a*e + b*d)*invΔ)
+    
+    # # this ensures sbar and tbar are in the domain
+    # # if they are out of the domain, the min distance is on a boundary
+    outside = sbar+tbar > one(sbar)
+    sbar = ifelse(outside,zero(sbar),sbar)
+    tbar = ifelse(outside,zero(tbar),tbar)
+    s0 = clamp01nan(-d/a)
+    t0 = clamp01nan(-e/c)
+    sd = clamp01nan(-(b-c+d-e)/(a-2b+c))
+    td = one(sd) - sd
+    r(s,t) = a*s^2 + 2b*s*t + c*t^2 + 2d*s + 2e*t
+
+    mins = sbar
+    mint = tbar
+    minr = r(sbar,tbar)
+    if  r(s0,0) < minr
+        minr = r(s0,0)
+        mins = s0
+        mint = zero(a)
+    end
+    if  r(0,t0) < minr
+        minr = r(0,t0)
+        mins = zero(a)
+        mint = t0
+    end
+    if  r(sd,td) < minr
+        minr = r(sd,td)
+        mins = sd
+        mint = td
+    end
+    d2cl = max(zero(a),f+minr)
+    return d2cl, SA[mins, mint]
 end
 
 
@@ -241,19 +320,73 @@ function dist2LineTriangle(x,y)
         # min distance is on an edge of the triangle.
         @inline dab = dist2LineLine(x,SA[a,b])
         @inline dbc = dist2LineLine(x,SA[b,c])
-        @inline dcd = dist2LineLine(x,SA[c,a])
+        @inline dca = dist2LineLine(x,SA[c,a])
         @inline dx1y = dist2PointTriangle(SA[x[1],],y)
         @inline dx2y = dist2PointTriangle(SA[x[2],],y)
         return Base.FastMath.min_fast(
             dab,
             dbc,
-            dcd,
+            dca,
             dx1y,
             dx2y,
         )
     end
 end
 
+
+"""
+Return the squared distance between a line segment and a triangle.
+And where on the line segment and triangle it occurs.
+"""
+function dist2LineTriangle_s_t(x,y)
+    fzero = zero(eltype(eltype(x)))
+    o = x[1]
+    d = x[2] - x[1]
+    a = y[1]
+    b = y[2]
+    c = y[3]
+    result = moller_trumbore_intersect(o, d, a, b, c)
+    if result.intersect == true
+        return fzero, SA[result.t,], SA[result.u, result.v]
+    else
+        # no intersection or seg and triangle are parallel.
+        # min distance is on an edge of the triangle.
+        d2min = typemax(fzero)
+        mins = SA[fzero,]
+        mint = SA[fzero, fzero]
+        d2, _smin, _tmin = dist2LineLine_s_t(x,SA[a,b])
+        if  d2 < d2min
+            d2min = d2
+            mins = SA[_smin,]
+            mint = SA[_tmin, fzero]
+        end
+        d2, _smin, _tmin = dist2LineLine_s_t(x,SA[b,c])
+        if  d2 < d2min
+            d2min = d2
+            mins = SA[_smin,]
+            mint = SA[one(fzero) - _tmin, _tmin]
+        end
+        d2, _smin, _tmin = dist2LineLine_s_t(x,SA[c,a])
+        if  d2 < d2min
+            d2min = d2
+            mins = SA[_smin,]
+            mint = SA[fzero, one(fzero) - _tmin]
+        end
+        d2, _tri_tmin = dist2PointTriangle_t(SA[x[1],],y)
+        if  d2 < d2min
+            d2min = d2
+            mins = SA[fzero,]
+            mint = _tri_tmin
+        end
+        d2, _tri_tmin = dist2PointTriangle_t(SA[x[2],],y)
+        if  d2 < d2min
+            d2min = d2
+            mins = SA[one(fzero),]
+            mint = _tri_tmin
+        end
+        return d2min, mins, mint
+    end
+end
 
 
 function dist2TriangleTriangle(x,y)
@@ -276,6 +409,42 @@ function dist2TriangleTriangle(x,y)
         ai, bi, ci = bi, ci, ai
     end
     return d2
+end
+
+
+function dist2TriangleTriangle_s_t(x,y)
+    T = eltype(eltype(x))
+    fzero = zero(T)
+    fone = one(T)
+    d2 = typemax(T)
+    ai = 1
+    bi = 2
+    ci = 3
+    mins = SA[fzero, fzero]
+    mint = SA[fzero, fzero]
+    for i in 1:3
+        @inline this_d2, _s, _t = dist2LineTriangle_s_t(SA[x[ai],x[bi]],y)
+        if this_d2 < d2
+            d2 = this_d2
+            _s_all = SA[fzero, _s[1], fone - _s[1]]
+            mins = SA[_s_all[bi],_s_all[ai]]
+            mint = _t
+        end
+        d2 == fzero && return d2, mins, mint
+        ai, bi, ci = bi, ci, ai
+    end
+    for i in 1:3
+        @inline this_d2, _s, _t = dist2LineTriangle_s_t(SA[y[ai],y[bi]],x)
+        if this_d2 < d2
+            d2 = this_d2
+            _s_all = SA[fzero, _s[1], fone - _s[1]]
+            mint = SA[_s_all[bi],_s_all[ai]]
+            mins = _t
+        end
+        d2 == fzero && return d2, mins, mint
+        ai, bi, ci = bi, ci, ai
+    end
+    return d2, mins, mint
 end
 
 
