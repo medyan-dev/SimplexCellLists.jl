@@ -170,3 +170,113 @@ function dist2PointTriangle(x,y)
         q(sbar,tbar),
     ))
 end
+
+
+"""
+Given point O, ray vector D, and a triangle with points (A,B,C), test whether the ray intersects the triangle.
+If there is an intersection P. Then P can be represented as
+
+    P = A + u(B-A) + v(C-A) = O + tD
+
+If there is not an intersection, `t`, `u` and `v` are undefined.
+"""
+struct SegTriangleIntersectResult{Float}
+    intersect::Bool
+    t::Float
+    u::Float
+    v::Float
+end
+
+"""
+A fast ray-triangle intersection algorithm by Moller and Trumbore.
+Ref: Tomas Möller and Ben Trumbore, "Fast, minimum storage ray-triangle intersection" (1997) Journal of Graphics Tools.
+"""
+function moller_trumbore_intersect(o, d, a, b, c)
+    fzero = zero(eltype(o))
+    seg_triangle_no_intersect = SegTriangleIntersectResult(false, fzero, fzero, fzero)
+
+    rab = b - a
+    rac = c - a
+    cross_d_rac = cross(d, rac)
+    det = dot(cross_d_rac, rab)
+
+    if det == zero(det)
+        return seg_triangle_no_intersect
+    end
+
+    invdet = inv(det)
+    rao = o - a
+    u = dot(cross_d_rac, rao) * invdet
+    if u < 0 || u > 1
+        return seg_triangle_no_intersect
+    end
+
+    cross_rao_rab = cross(rao, rab)
+    v = dot(cross_rao_rab, d) * invdet
+    if v < 0 || u + v > 1
+        return seg_triangle_no_intersect
+    end
+
+    t = dot(cross_rao_rab, rac) * invdet
+    if t < 0 || t > 1
+        return seg_triangle_no_intersect
+    end
+
+    SegTriangleIntersectResult(true, t, u, v)
+end
+
+
+function dist2LineTriangle(x,y)
+    fzero = zero(eltype(eltype(x)))
+    o = x[1]
+    d = x[2] - x[1]
+    a = y[1]
+    b = y[2]
+    c = y[3]
+    result = moller_trumbore_intersect(o, d, a, b, c)
+    if result.intersect == true
+        return fzero
+    else
+        # no intersection or seg and triangle are parallel.
+        # min distance is on an edge of the triangle.
+        dab = dist2LineLine(x,SA[a,b])
+        dbc = dist2LineLine(x,SA[b,c])
+        dcd = dist2LineLine(x,SA[c,a])
+        dx1y = dist2PointTriangle(SA[x[1],],y)
+        dx2y = dist2PointTriangle(SA[x[2],],y)
+        return Base.FastMath.min_fast(
+            dab,
+            dbc,
+            dcd,
+            dx1y,
+            dx2y,
+        )
+    end
+end
+
+
+
+function dist2TriangleTriangle(x,y)
+    T = eltype(eltype(x))
+    fzero = zero(T)
+    d2 = typemax(T)
+    ai = 1
+    bi = 2
+    ci = 3
+    for i in 1:3
+        this_d2 = dist2LineTriangle(SA[x[ai],x[bi]],y)
+        d2 = Base.FastMath.min_fast(d2, this_d2)
+        d2 == fzero && return d2
+        ai, bi, ci = bi, ci, ai
+    end
+    for i in 1:3
+        this_d2 = dist2LineTriangle(SA[y[ai],y[bi]],x)
+        d2 = Base.FastMath.min_fast(d2, this_d2)
+        d2 == fzero && return d2
+        ai, bi, ci = bi, ci, ai
+    end
+    return d2
+end
+
+
+

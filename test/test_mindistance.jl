@@ -101,23 +101,66 @@ end
     end
 end
 
+@testset "line to triangle edge case" begin
+    a = SVector{3, Float64}[
+        [0.7962602087717146, 0.7678176789137129, 0.33365738129157096], 
+        [0.8787232878884521, 0.22723122900042247, 0.29743853859367475],
+    ]
+    b = SVector{3, Float64}[
+        [0.32244253613423346, 0.07951105154799964, 0.3048568965486481], 
+        [0.48609530074630236, 0.14522371134511514, 0.7921987380603223], 
+        [0.1937122261241142, 0.9991063549453244, 0.3332458906215262],
+    ]
+    ref_d2min = refDist2(a,b)
+    d2min = SimplexCellLists.dist2LineTriangle(a,b)
+    @test ref_d2min ≈ d2min atol = 1E-11 rtol = 1E-11
+end
+    
 
-# @testset "line to triangle" begin
-#     N = 10
-#     a = rand(SVector{2,SVector{3,Float64}},N)
-#     b = rand(SVector{3,SVector{3,Float64}},N)
-#     for i in 1:N
-#         ref_d2min = refDist2(a[i],b[i])
-#         d2min = SimplexCellLists.dist2LineTriangle(a[i],b[i])
-#         # d2min_s_t, smin, tmin = SimplexCellLists.dist2LineLine_s_t(a[i],b[i])
-#         # @test 0 ≤ d2min_s_t
-#         # @test d2min ≈ d2min_s_t
-#         # @test 0 ≤ d2min
-#         @test ref_d2min ≈ d2min
-#         # @test 0 ≤ tmin ≤ 1
-#         # s_full = SA[1.0-smin, smin]
-#         # t_full = SA[1.0-tmin, tmin]
-#         # r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
-#         # @test d2min ≈ r⋅r
-#     end
-# end
+@testset "line to triangle" begin
+    N = 1000
+    a = rand(SVector{2,SVector{3,Float64}},N)
+    b = rand(SVector{3,SVector{3,Float64}},N)
+    for i in 1:N
+        ref_d2min = refDist2(a[i],b[i])
+        d2min = SimplexCellLists.dist2LineTriangle(a[i],b[i])
+        # d2min_s_t, smin, tmin = SimplexCellLists.dist2LineLine_s_t(a[i],b[i])
+        # @test 0 ≤ d2min_s_t
+        # @test d2min ≈ d2min_s_t
+        # @test 0 ≤ d2min
+        if abs(ref_d2min - d2min) > 1E-11
+            @show abs(ref_d2min - d2min)
+            @show d2min
+            @show ref_d2min
+            @show a[i]
+            @show b[i]
+            println()
+        end
+        @test ref_d2min ≈ d2min atol = 1E-11
+        # @test 0 ≤ tmin ≤ 1
+        # s_full = SA[1.0-smin, smin]
+        # t_full = SA[1.0-tmin, tmin]
+        # r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
+        # @test d2min ≈ r⋅r
+    end
+end
+
+@testset "triangle to triangle" begin
+    N = 1000
+    a = rand(SVector{3,SVector{3,Float64}},N)
+    b = rand(SVector{3,SVector{3,Float64}},N)
+    for i in 1:N
+        ref_d2min = refDist2(a[i],b[i])
+        d2min = SimplexCellLists.dist2TriangleTriangle(a[i],b[i])
+        # d2min_s_t, smin, tmin = SimplexCellLists.dist2LineLine_s_t(a[i],b[i])
+        # @test 0 ≤ d2min_s_t
+        # @test d2min ≈ d2min_s_t
+        # @test 0 ≤ d2min
+        @test ref_d2min ≈ d2min atol = 1E-11
+        # @test 0 ≤ tmin ≤ 1
+        # s_full = SA[1.0-smin, smin]
+        # t_full = SA[1.0-tmin, tmin]
+        # r = (sum(a[i] .* s_full) - sum(b[i] .* t_full))
+        # @test d2min ≈ r⋅r
+    end
+end
