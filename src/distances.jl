@@ -239,11 +239,11 @@ function dist2LineTriangle(x,y)
     else
         # no intersection or seg and triangle are parallel.
         # min distance is on an edge of the triangle.
-        dab = dist2LineLine(x,SA[a,b])
-        dbc = dist2LineLine(x,SA[b,c])
-        dcd = dist2LineLine(x,SA[c,a])
-        dx1y = dist2PointTriangle(SA[x[1],],y)
-        dx2y = dist2PointTriangle(SA[x[2],],y)
+        @inline dab = dist2LineLine(x,SA[a,b])
+        @inline dbc = dist2LineLine(x,SA[b,c])
+        @inline dcd = dist2LineLine(x,SA[c,a])
+        @inline dx1y = dist2PointTriangle(SA[x[1],],y)
+        @inline dx2y = dist2PointTriangle(SA[x[2],],y)
         return Base.FastMath.min_fast(
             dab,
             dbc,
@@ -264,13 +264,13 @@ function dist2TriangleTriangle(x,y)
     bi = 2
     ci = 3
     for i in 1:3
-        this_d2 = dist2LineTriangle(SA[x[ai],x[bi]],y)
+        @inline this_d2 = dist2LineTriangle(SA[x[ai],x[bi]],y)
         d2 = Base.FastMath.min_fast(d2, this_d2)
         d2 == fzero && return d2
         ai, bi, ci = bi, ci, ai
     end
     for i in 1:3
-        this_d2 = dist2LineTriangle(SA[y[ai],y[bi]],x)
+        @inline this_d2 = dist2LineTriangle(SA[y[ai],y[bi]],x)
         d2 = Base.FastMath.min_fast(d2, this_d2)
         d2 == fzero && return d2
         ai, bi, ci = bi, ci, ai
