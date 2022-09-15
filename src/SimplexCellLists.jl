@@ -27,7 +27,10 @@ distSqr_sMin(x::Point, y::Line)      = dist2PointLine( x, y), SA_F32[]
 distSqr_sMin(x::Point, y::Triangle)  = dist2PointTriangle( x, y), SA_F32[]
 distSqr_sMin(x::Line, y::Point)  = ((i -> (i[1], SA_F32[i[2]])) ∘ dist2PointLine_t)( y, x)
 distSqr_sMin(x::Line, y::Line)   = ((i -> (i[1], SA_F32[i[2]])) ∘ dist2LineLine_s_t)( x, y)
+distSqr_sMin(x::Line, y::Triangle)   = ((i -> (i[1], i[2])) ∘ dist2LineTriangle_s_t)( x, y)
 distSqr_sMin(x::Triangle, y::Point)    = dist2PointTriangle_t( y, x)
+distSqr_sMin(x::Triangle, y::Line)   = ((i -> (i[1], i[3])) ∘ dist2LineTriangle_s_t)( y, x)
+distSqr_sMin(x::Triangle, y::Triangle)   = ((i -> (i[1], i[2])) ∘ dist2TriangleTriangle_s_t)( x, y)
 
 """
 Abstract type for all SimplexCellList implementations.
