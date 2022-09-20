@@ -34,21 +34,6 @@ function Naive(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroup
 end
 
 
-"""
-Reset the elements stored in `s` in batch:
-
-```julia
-setElements!(s::Naive, points, lines, triangles)::Nothing
-```
-
-Where `points`, `lines` and `triangles` are collections of collections of objects convertible to 
-`Point`, `Line`, and `Triangle` respectively.
-
-For example, each collection in `points` is a group of points that can be mapped over independently from, or together with, other groups.
-
-Added elements will have a group index and element index based on the order of the inputs.
-The first group in each type has group index 1, and the first element in each group has element index 1.
-"""
 function setElements!(s::Naive, points, lines, triangles)::Nothing
     @argcheck length(points) == length(s.data[1])
     @argcheck length(lines) == length(s.data[2])
@@ -68,76 +53,35 @@ function setElements!(s::Naive, points, lines, triangles)::Nothing
     return
 end
 
-"""
-Add a new element to `s`, and return its element index:
 
-```julia
-addElement!(s::Naive, group_idx::Integer, element::Simplex{N})::Int32
-```
-The new element will be pushed to the end of the specified group.
-"""
 function addElement!(s::Naive, group_idx::Integer, element::Simplex{N})::Int32 where {N}
     group = push!(s.data[N][group_idx],element)
     push!(s.exists[N][group_idx], true)
     return length(group)
 end
 
-"""
-Deactivate an existing element in `s`
 
-```julia
-deactivate!(s::Naive, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Nothing
-```
-Inactive elements are not mapped over. Elements are active by default.
-"""
 function deactivate!(s::Naive, group_idx::Integer, element_idx::Integer, elementtype::Type{Simplex{N}})::Nothing where {N}
     s.exists[N][group_idx][element_idx] = false
     return
 end
 
-"""
-Re-activate an existing element in `s`
 
-```julia
-activate!(s::Naive, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Nothing
-```
-Inactive elements are not mapped over. Elements are active by default.
-"""
 function activate!(s::Naive, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Nothing where {N}
     s.exists[N][group_idx][element_idx] = true
     return
 end
 
-"""
-Return if an existing element in `s` is active.
-
-```julia
-isActive(s::Naive, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Bool
-```
-Inactive elements are not mapped over. Elements are active by default.
-"""    
-function activate!(s::Naive, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Bool where {N}
-    s.exists[N][group_idx][element_idx] = true
-    return
+ 
+function isActive(s::Naive, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Bool where {N}
+    s.exists[N][group_idx][element_idx]
 end
 
-"""
-map a function to all elements in `groupid` within distance `cutoff` of one simplex
 
-The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
-
-`x` is always `x` and i is always 0.
-
-    function f(x,y,i,j,d2,output)
-        # update output
-        return output
-    end
-"""
-function mapSimplexElements(f, output, m::Naive, groupid::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
+function mapSimplexElements(f, output, s::Naive, x::Simplex{N}, group_idx::Integer, elements_type::Type{Simplex{M}}, cutoff::Float32) where {N, M}
     # just loop through all element in groupid
-    group = m.data[M][groupid]
-    exists = m.exists[M][groupid]
+    group = s.data[M][group_idx]
+    exists = s.exists[M][group_idx]
     cutoff_sqr = cutoff^2
     for (j, y) in enumerate(group)
         if exists[j]
@@ -151,22 +95,11 @@ function mapSimplexElements(f, output, m::Naive, groupid::Integer, x::Simplex{N}
 end
 
 
-"""
-map a function to all pairs of elements in the same group in range of each other.
-
-The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{N, SVector{3, Float32}}`
-
-    function f(x,y,i,j,d2,output)
-        # update output
-        return output
-    end
-"""
-function mapPairElements(f, output, m::Naive, groupid::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
+function mapPairElements(f, output, s::Naive, group_idx::Integer, elements_type::Type{Simplex{N}}, cutoff::Float32) where {N}
     # just double loop through all element in groupid
     cutoff_sqr = cutoff^2
-    group = m.data[N][groupid]
-    exists = m.exists[N][groupid]
+    group = s.data[N][group_idx]
+    exists = s.exists[N][group_idx]
     n = length(group)
     for i in 1:(n-1)
         if exists[i]
@@ -186,33 +119,22 @@ function mapPairElements(f, output, m::Naive, groupid::Integer, elementstype::Ty
 end
 
 
-"""
-map a function to all pairs of elements in different groups in range of each other.
-
-The function f should have the same form as used in CellListMap.jl
-Except here `x` and `y` are `SVector{N, SVector{3, Float32}}`, `SVector{M, SVector{3, Float32}}`
-
-    function f(x,y,i,j,d2,output)
-        # update output
-        return output
-    end
-"""
 function mapElementsElements(
         f, 
         output, 
-        m::Naive, 
-        x_groupid::Integer, 
+        s::Naive, 
+        x_group_idx::Integer, 
         x_type::Type{Simplex{N}}, 
-        y_groupid::Integer, 
+        y_group_idx::Integer, 
         y_type::Type{Simplex{M}}, 
         cutoff::Float32,
     ) where {N, M}
     cutoff_sqr = cutoff^2
-    # just double loop through all element in groupid
-    x_group = m.data[N][x_groupid]
-    x_exists = m.exists[N][x_groupid]
-    y_group = m.data[M][y_groupid]
-    y_exists = m.exists[M][y_groupid]
+    # just double loop through all elements
+    x_group = s.data[N][x_group_idx]
+    x_exists = s.exists[N][x_group_idx]
+    y_group = s.data[M][y_group_idx]
+    y_exists = s.exists[M][y_group_idx]
     xn = length(x_group)
     yn = length(y_group)
     for i in 1:xn

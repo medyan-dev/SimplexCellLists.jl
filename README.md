@@ -118,7 +118,7 @@ Therefore, if more precision is needed, add some extra distance to the cutoff, s
 Map `f` to all simplexes in a group close to a single simplex.
 
 ```julia
-mapSimplexElements(f, output, s::T, group_idx::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
+mapSimplexElements(f, output, s::T, x::Simplex{N}, group_idx::Integer, elements_type::Type{Simplex{M}}, cutoff::Float32) where {N, M}
 ```
 
 Apply function `f` to all elements in group `group_idx` within the cutoff range of the simplex `x`, and
@@ -131,7 +131,7 @@ return the output of the final `f` call.
 Map `f` to all pairs of nearby simplexes in a single group.
 
 ```julia
-mapPairElements(f, output, s::T, group_idx::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
+mapPairElements(f, output, s::T, group_idx::Integer, elements_type::Type{Simplex{N}}, cutoff::Float32) where {N}
 ```
 Apply function `f` to all unordered pairs of elements in group `group_idx` within cutoff range, and return the output of the final `f` call.
 
