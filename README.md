@@ -38,10 +38,10 @@ and `numtrianglegroups` is the number of groups of triangles.
 `kwargs` are options specific for `T`
 
 ### `setElements!`
-Reset the elements stored in `T` in batch:
+Reset the elements stored in `s` in batch:
 
 ```julia
-setElements!(m::T, points, lines, triangles)::Nothing
+setElements!(s::T, points, lines, triangles)::Nothing
 ```
 
 Where `points`, `lines` and `triangles` are collections of collections of objects convertible to 
@@ -53,34 +53,34 @@ Added elements will have a group index and element index based on the order of t
 The first group in each type has group index 1, and the first element in each group has element index 1.
 
 ### `addElement!`
-Add a new element to `T`, and return its element index:
+Add a new element to `s`, and return its element index:
 
 ```julia
-addElement!(m::T, groupidx::Integer, element::Simplex{N})::Int32
+addElement!(s::T, group_idx::Integer, element::Simplex{N})::Int32
 ```
 The new element will be pushed to the end of the specified group.
 
 ### `deactivate!`
-Deactivate an existing element in `T`
+Deactivate an existing element in `s`
 
 ```julia
-deactivate!(m::T, groupidx::Integer, elementidx::Integer, elementtype::Type{Simplex{N}})::Nothing
+deactivate!(s::T, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Nothing
 ```
 Inactive elements are not mapped over. Elements are active by default.
 
 ### `activate!`
-Re-activate an existing element in `T`
+Re-activate an existing element in `s`
 
 ```julia
-activate!(m::T, groupidx::Integer, elementidx::Integer, elementtype::Type{Simplex{N}})::Nothing
+activate!(s::T, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Nothing
 ```
 Inactive elements are not mapped over. Elements are active by default.
 
 ### `isActive`
-Return if an existing element in `T` is active.
+Return if an existing element in `s` is active.
 
 ```julia
-isActive(m::T, groupidx::Integer, elementidx::Integer, elementtype::Type{Simplex{N}})::Bool
+isActive(s::T, group_idx::Integer, element_idx::Integer, element_type::Type{Simplex{N}})::Bool
 ```
 Inactive elements are not mapped over. Elements are active by default.
 
@@ -118,10 +118,10 @@ Therefore, if more precision is needed, add some extra distance to the cutoff, s
 Map `f` to all simplexes in a group close to a single simplex.
 
 ```julia
-mapSimplexElements(f, output, m::T, groupidx::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
+mapSimplexElements(f, output, s::T, group_idx::Integer, x::Simplex{N}, elementstype::Type{Simplex{M}}, cutoff::Float32) where {N, M}
 ```
 
-Apply function `f` to all elements in group `groupidx` within the cutoff range of the simplex `x`, and
+Apply function `f` to all elements in group `group_idx` within the cutoff range of the simplex `x`, and
 return the output of the final `f` call.
 
 `x` is always `x` and `i` is always 0, in calls to `f`.
@@ -131,9 +131,9 @@ return the output of the final `f` call.
 Map `f` to all pairs of nearby simplexes in a single group.
 
 ```julia
-mapPairElements(f, output, m::T, groupidx::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
+mapPairElements(f, output, s::T, group_idx::Integer, elementstype::Type{Simplex{N}}, cutoff::Float32) where {N}
 ```
-Apply function `f` to all unordered pairs of elements in group `groupidx` within cutoff range, and return the output of the final `f` call.
+Apply function `f` to all unordered pairs of elements in group `group_idx` within cutoff range, and return the output of the final `f` call.
 
 `f` is never called more than once per unordered pair. Which element is `x` and `y` in calls to `f` is implementation dependent.
 
@@ -146,16 +146,16 @@ Map `f` to all pairs of nearby simplexes between two different groups.
 mapElementsElements(
         f, 
         output, 
-        m::T, 
-        x_groupidx::Integer, 
+        s::T, 
+        x_group_idx::Integer, 
         x_type::Type{Simplex{N}}, 
-        y_groupidx::Integer, 
+        y_group_idx::Integer, 
         y_type::Type{Simplex{M}}, 
         cutoff::Float32,
     ) where {N, M}
 ```
 Apply function `f` to each pair of elements from two different groups that are within cutoff range of each other, and return the output of the final `f` call.
 
-The first element has is an `x_type` in group `x_groupidx` and the second element is a `y_type` in group `y_groupidx`.
+The first element has is an `x_type` in group `x_group_idx` and the second element is a `y_type` in group `y_group_idx`.
 
 `f` is never called more than once per pair.
