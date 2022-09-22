@@ -73,20 +73,48 @@ end
 @testset "mapSimplexElements" begin
     @testset "empty cell list" begin
         s = SimplexCellLists.Naive(2, 2, 2)
-        mapSimplexElements(test_f_mapSimplexElements!, 0, s, SA[SA_F32[3,4,6]], 1 ,SimplexCellLists.Line, 10.0f0)
+        out = zeros(Int,2)
+        mapSimplexElements(test_f_mapSimplexElements!, out, s, SA[SA_F32[3,4,6]], 1 ,SimplexCellLists.Line, 10.0f0)
+        @test out == zero(out)
     end
     @testset "basic tests" begin
-        for i in 10*trials
-            scale = rand()*100.0
-            rotation = rand(RotMat{3,Float32})
+        for i in 1:10
+            scale = Float32(rand()*100.0)
+            rotation = rand(RotMatrix{3,Float32})
             translation = randn(SVector{3,Float32}) * scale
+            function trans(in)
+                pts = reinterpret(SVector{3,Float32},in)
+                map(pts) do pt
+                    rotation * (pt * scale) + translation 
+                end
+            end
             s = SimplexCellLists.Naive(2, 2, 2)
-            makeBasicCellList!(
-                scale = 1.0f0,
-                rotation = one(RotMat{3,Float32}),
-                translation = SA_F32[0,0,0],
-                emptycelllist::SimplexCellList,
+            elements = makeBasicCellList!(
+                scale,
+                rotation,
+                translation,
+                s,
             )
-        mapSimplexElements(test_f_mapSimplexElements!, 0, s, SA[SA_F32[3,4,6]], 1 ,SimplexCellLists.Line, 10.0f0)
+            simplex_types = (SimplexCellLists.Point, SimplexCellLists.Line, SimplexCellLists.Triangle)
+            group_idxs = (1,2)
+            i = 0
+            for group_type in simplex_types
+                for idx in group_idxs
+                    i+=1
+                    cutoff = scale*6.001f0
+                    f(x...) = test_f_mapSimplexElements!(x..., elements[i], cutoff)
+                    out = mapSimplexElements( f, zeros(Int,2), s, trans(SA[SA_F32[0,0,0]]), idx ,group_type, cutoff)
+                    @test out == [1,1]
+
+                    cutoff = scale*5.99f0
+                    out = mapSimplexElements( f, zeros(Int,2), s, trans(SA[SA_F32[0,0,0]]), idx ,group_type, cutoff)
+                    @test out == [0,0]
+
+                    cutoff = scale*6.0f0
+                    out = mapSimplexElements( f, zeros(Int,2), s, trans(SA[SA_F32[0.01,0,0]]), idx ,group_type, cutoff)
+                    @test out == (idx==1 ? [0,1] : [1,0])
+                end
+            end
+        end
     end
 end

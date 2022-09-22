@@ -47,6 +47,7 @@ and `numtrianglegroups` is the number of groups of triangles.
 `kwargs` are options specific for `T`
 """
 abstract type SimplexCellList end
+export SimplexCellList
 
 include("naive.jl")
 include("painter.jl")

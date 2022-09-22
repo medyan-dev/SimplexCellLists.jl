@@ -51,16 +51,17 @@ end
 
 
 function makeBasicCellList!(
-        scale = 1.0f0,
-        rotation = one(RotMat{3,Float32}),
-        translation = SA_F32[0,0,0],
-        emptycelllist::SimplexCellList,
+        scale,
+        rotation,
+        translation,
+        emptycelllist::SimplexCellLists.SimplexCellList,
     )
     function transform(in)
         pts = reinterpret(SVector{3,Float32},in)
-        map(pts) do pt
+        outpts = map(pts) do pt
             rotation * (pt * scale) + translation 
         end
+        copy(reinterpret(eltype(in),outpts))
     end
     points1 = transform([
         SA[SA_F32[-6,0,0]],
@@ -91,12 +92,12 @@ function makeBasicCellList!(
         [lines1[1:nl1],lines2[1:nl2]],
         [triangles1[1:nt1],triangles2[1:nt2]],
     )
-    addElement!.(emptycelllist,1,points1[np1+1:end])
-    addElement!.(emptycelllist,2,points2[np2+1:end])
-    addElement!.(emptycelllist,1,lines1[nl1+1:end])
-    addElement!.(emptycelllist,2,lines2[nl2+1:end])
-    addElement!.(emptycelllist,1,triangles1[nt1+1:end])
-    addElement!.(emptycelllist,2,triangles2[nt2+1:end])
-    emptycelllist
+    addElement!.(Ref(emptycelllist),1,points1[np1+1:end])
+    addElement!.(Ref(emptycelllist),2,points2[np2+1:end])
+    addElement!.(Ref(emptycelllist),1,lines1[nl1+1:end])
+    addElement!.(Ref(emptycelllist),2,lines2[nl2+1:end])
+    addElement!.(Ref(emptycelllist),1,triangles1[nt1+1:end])
+    addElement!.(Ref(emptycelllist),2,triangles2[nt2+1:end])
+    points1, points2, lines1, lines2, triangles1, triangles2 
 end
 
