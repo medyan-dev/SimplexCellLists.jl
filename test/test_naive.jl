@@ -1,4 +1,11 @@
 # Test Naive
+using StaticArrays
+using LinearAlgebra
+using SimplexCellLists
+using Random
+using Test
+using ArgCheck
+using Rotations
 
 include("common.jl")
 
@@ -64,4 +71,22 @@ end
     @test 1 == addElement!(twoallgroup_s, 1, SA[SA_F32[3,4,6], SA_F32[4,4,6], SA_F32[5,5,6]])
 end
 @testset "mapSimplexElements" begin
+    @testset "empty cell list" begin
+        s = SimplexCellLists.Naive(2, 2, 2)
+        mapSimplexElements(test_f_mapSimplexElements!, 0, s, SA[SA_F32[3,4,6]], 1 ,SimplexCellLists.Line, 10.0f0)
+    end
+    @testset "basic tests" begin
+        for i in 10*trials
+            scale = rand()*100.0
+            rotation = rand(RotMat{3,Float32})
+            translation = randn(SVector{3,Float32}) * scale
+            s = SimplexCellLists.Naive(2, 2, 2)
+            makeBasicCellList!(
+                scale = 1.0f0,
+                rotation = one(RotMat{3,Float32}),
+                translation = SA_F32[0,0,0],
+                emptycelllist::SimplexCellList,
+            )
+        mapSimplexElements(test_f_mapSimplexElements!, 0, s, SA[SA_F32[3,4,6]], 1 ,SimplexCellLists.Line, 10.0f0)
+    end
 end
