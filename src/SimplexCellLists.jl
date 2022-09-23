@@ -4,6 +4,7 @@ include("distances.jl")
 
 using StaticArrays
 using ArgCheck
+const PUBLIC = "public\n\n"
 
 const Simplex{N} = SVector{N, SVector{3, Float32}}
 const Point = Simplex{1}

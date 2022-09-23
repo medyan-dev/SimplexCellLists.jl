@@ -2,7 +2,7 @@
 
 
 
-"""
+"""$PUBLIC
 A simple `SimplexCellList` with no extra options that uses double for loops.
 
     Naive(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroups::Integer)
