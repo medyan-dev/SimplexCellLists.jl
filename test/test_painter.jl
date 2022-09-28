@@ -6,6 +6,9 @@ using SimplexCellLists
 using Random
 using Test
 
+include("common.jl")
+
+
 
 Random.seed!(1234)
 
@@ -363,7 +366,66 @@ end
     @test out == 1
 end
 
-@testset "map pairs" begin
+@testset "map pairs of simplex $M in the same group" for M in (1:3)
+    simplex_type = SimplexCellLists.Simplex{M}
+    for trial in 1:20
+        N = 1000
+        scale = Float32(exp(rand()*4.0 - 2))
+        elements = scale .* rand(simplex_type, N)
+        naive = SimplexCellLists.Naive(1, 1, 1)
+        painter = SimplexCellLists.Painter(1, 1, 1;
+            min_point = SA[0.0,0.0,0.0],
+            max_point = SA[scale,scale,scale],
+            voxel_length= scale*1/10,
+            max_range= scale*0.1,
+        )
+        total_elements = [[[]],[[]],[[]]]
+        total_elements[M][1] = elements
+        SimplexCellLists.setElements!(naive,total_elements...)
+        SimplexCellLists.setElements!(painter,total_elements...)
+        SimplexCellLists.addElement!(naive,1,elements[1])
+        SimplexCellLists.addElement!(painter,1,elements[1])
+        push!(elements,elements[1])
+        delid = rand(eachindex(elements))
+        SimplexCellLists.deactivate!(painter, 1, delid, simplex_type)
+        SimplexCellLists.deactivate!(naive, 1, delid, simplex_type)
+        cutoff = scale*0.099f0
+        f!(x...) = test_f_mapPairElements!(x..., elements,cutoff)
+        naive_out = SimplexCellLists.mapPairElements(
+            f!,
+            zeros(length(elements),length(elements)),
+            naive,
+            1,
+            simplex_type,
+            cutoff,
+        )
+        painter_out = SimplexCellLists.mapPairElements(
+            f!,
+            zeros(length(elements),length(elements)),
+            painter,
+            1,
+            simplex_type,
+            cutoff,
+        )
+        if naive_out != painter_out
+            println("Simplex $M")
+            dif_inds = findall(naive_out .!= painter_out)
+            for ind in dif_inds
+                @show ind
+                @show naive_out[ind], painter_out[ind]
+                d2 = SimplexCellLists.distSqr(lines[ind[1]], lines[ind[2]])
+                @show d2
+                @show √(d2)
+                @show cutoff
+                println()
+            end
+            println()
+        end
+        @test naive_out == painter_out
+    end
+end
+
+@testset "map pairs in the same group" begin
     for trial in 1:20
         N = 1000
         triangles = trial .* rand(SVector{3,SVector{3,Float32}},N)

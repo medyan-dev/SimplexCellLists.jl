@@ -18,6 +18,9 @@ and another corner at `(grid_start .- voxel_length/2) + grid_size*voxel_length`
 
 `grid_size` is the number of cubic voxels in each dimension and `voxel_length` is the side length of each voxel.
 
+`min_point` and `max_point` instead of `grid_size` and `grid_start` to specify corners of the grid.
+The actual grid corners can extend by up to half a voxel length out from `min_point` and `max_point`.   
+
 Elements can safely be outside of the grid, but a large number of elements outside the grid will degrade performance.
 
 `max_range` is the max cutoff that can be used when using the mapping functions. It is specified per group, or for all groups.
@@ -56,11 +59,24 @@ end
 
 
 function Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroups::Integer;
-        grid_start::SVector{3,<:AbstractFloat},
-        grid_size::SVector{3,<:Integer},
+        grid_start::Union{SVector{3,<:AbstractFloat}, Nothing}=nothing,
+        grid_size::Union{SVector{3,<:Integer}, Nothing}=nothing,
+        min_point::Union{SVector{3,<:AbstractFloat}, Nothing}=nothing,
+        max_point::Union{SVector{3,<:AbstractFloat}, Nothing}=nothing,
         voxel_length::AbstractFloat,
         max_range::Union{SVector{3, <:Vector{<:AbstractFloat}}, AbstractFloat},
     )
+    if isnothing(grid_start) & isnothing(grid_size)
+        @argcheck !isnothing(min_point)
+        @argcheck !isnothing(max_point)
+        @argcheck all(max_point .≥ min_point)
+        grid_size = max.(ceil.(Int32, (max_point-min_point) ./ voxel_length), Int32(1))
+        real_grid_size = grid_size .* voxel_length
+        grid_center = (1//2)*(max_point + min_point)
+        grid_start = grid_center - (1//2)*real_grid_size .+ (1//2)*voxel_length
+    end
+    @argcheck !isnothing(grid_start)
+    @argcheck !isnothing(grid_size)
     @argcheck voxel_length > 0
     _max_range = if max_range isa AbstractFloat
         [fill(max_range,n) for n in (numpointgroups, numlinegroups, numtrianglegroups)]
@@ -86,34 +102,6 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegro
     )
 end
 
-
-"""$PUBLIC
-Alternate constructor.
-    Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroups::Integer;
-        min_point::SVector{3,<:AbstractFloat},
-        max_point::SVector{3,<:AbstractFloat},
-        voxel_length::AbstractFloat,
-        max_range::SVector{3, <:Vector{<:AbstractFloat}},
-    )
-"""
-function Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroups::Integer;
-        min_point::SVector{3,<:AbstractFloat},
-        max_point::SVector{3,<:AbstractFloat},
-        voxel_length::AbstractFloat,
-        max_range::SVector{3, <:Vector{<:AbstractFloat}},
-    )
-    @argcheck all(max_point .≥ min_point)
-    grid_size = max.(ceil.(Int32, (max_point-min_point) ./ voxel_length), Int32(1))
-    real_grid_size = grid_size .* voxel_length
-    grid_center = (1//2)*(max_point + min_point)
-    grid_start = grid_center - (1//2)*real_grid_size .+ (1//2)*voxel_length
-    Painter(numpointgroups, numlinegroups, numtrianglegroups;
-        grid_start,
-        grid_size,
-        voxel_length,
-        max_range,
-    )
-end
 
 """
 Return nearest grid point, x is in grid units
@@ -260,14 +248,14 @@ x and y are in grid units
             R::Int32 = clamp(trunc(Int32, smin[1]*halfn),Int32(0),halfn-Int32(1))*Int32(2) + Int32(1)
             return _getSampleGridPoint(inv_n, n, R, x, grid_size)
         end
-    elseif N == 3
-        if isnothing(extra)
-            return _nearestGridPoint(grid_size, 1//3*(x[3] + x[2] + x[1]))
-        else
-            d2, smin = distSqr_sMin(x,y)
-            pt = (1-(smin[1]+smin[2])).*x[1] + smin[1].*x[2] + smin[2].*x[3]
-            return _nearestGridPoint(grid_size, pt)
-        end
+    # elseif N == 3
+    #     if isnothing(extra)
+    #         return _nearestGridPoint(grid_size, 1//3*(x[3] + x[2] + x[1]))
+    #     else
+    #         d2, smin = distSqr_sMin(x,y)
+    #         pt = (1-(smin[1]+smin[2])).*x[1] + smin[1].*x[2] + smin[2].*x[3]
+    #         return _nearestGridPoint(grid_size, pt)
+    #     end
     else
         error("simplexes with $N points not supported")
     end
@@ -524,11 +512,8 @@ function mapSimplexElements(
         end
     else
         # Now more than one voxel needs to be sampled, yikes.
-        # I need to ensure that _canonicalGridPoint can find a gridpoint that is actually sampled
-        # This is to avoid double counting
-        # start by getting a axis aligned bounding box around x
-        # we need to sample any voxels that x touches or could touch 
-        # given floating point rounding.
+        # 
+        visited = Dict{Int32,Float32}()
         bottom = min.(x...)
         top = max.(x...)
         maxabs = max.(abs.(top),abs.(bottom))
@@ -569,20 +554,83 @@ function mapSimplexElements(
                     if sqrdist ≤ voxelcutoff_sqr
                         # load other element
                         if exists[j]
-                            y = group[j]
-                            @inline d2 = distSqr(x, y)
-                            if d2 ≤ cutoff_sqr 
-                                c_gridpoint = _canonicalGridPoint(x, y, s.grid_size, true)
-                                if gridpoint == c_gridpoint
-                                    in_y = (y .* s.voxel_length) .+ (s.grid_start,)
-                                    @inline output = f(in_x, in_y, i, j, d2*voxel_length_sqr, output)
-                                end
+                            if !(haskey(visited,j))
+                                y = group[j]
+                                @inline d2 = distSqr(x, y)
+                                visited[j] = d2 
                             end
                         end
                     end
                 end
             end
         end
+        for (j,d2) in pairs(visited)
+            if d2 ≤ cutoff_sqr
+                y = group[j]
+                in_y = (y .* s.voxel_length) .+ (s.grid_start,)
+                @inline output = f(in_x, in_y, i, j, d2*voxel_length_sqr, output)
+            end
+        end
+        # I need to ensure that _canonicalGridPoint can find a gridpoint that is actually sampled
+        # This is to avoid double counting
+        # start by getting a axis aligned bounding box around x
+        # we need to sample any voxels that x touches or could touch 
+        # given floating point rounding.
+
+        # bottom = min.(x...)
+        # top = max.(x...)
+        # maxabs = max.(abs.(top),abs.(bottom))
+        # error_est = 32*eps(maximum(maxabs))
+        # top_extend_int = round.(Int32, top .+ error_est)
+        # bottom_extend_int = round.(Int32, bottom .- error_est)
+        # check_outside = false
+        # if any(top_extend_int .> (s.grid_size .- Int32(1))) || any(bottom_extend_int .< Int32(0))
+        #     check_outside = true
+        #     top_extend_int = clamp.(top_extend_int, Int32(0), (s.grid_size .- Int32(1)))
+        #     bottom_extend_int = clamp.(bottom_extend_int, Int32(0), (s.grid_size .- Int32(1)))
+        # end
+        # samplevoxelcutoff = Float32(1//2*√(3)) + error_est + MAX_SAMPLE_SPACING
+        # samplevoxelcutoff2 = samplevoxelcutoff^2
+        # for gridpoint_tuple in Iterators.flatten(((nothing,), Iterators.product(range.(bottom_extend_int,top_extend_int)...)))
+        #     gridpoint = isnothing(gridpoint_tuple) ? nothing : SVector(gridpoint_tuple)
+        #     # if gridpoint is outside but we don't need to check outside, skip
+        #     if isnothing(gridpoint) && !check_outside
+        #         continue
+        #     end
+        #     # continue if the triangle could not possibly be in the voxel
+        #     if !isnothing(gridpoint)
+        #         @inline voxel_float = SVector{3,Float32}(gridpoint...)
+        #         @inline sample_voxel_d2 = distSqr(SA[voxel_float,], x)
+        #         if sample_voxel_d2 > samplevoxelcutoff2
+        #             continue
+        #         end
+        #     end
+        #     # at this point we want to sample gridpoint
+        #     voxel = if isnothing(gridpoint)
+        #         outsidegrid[group_idx]
+        #     else
+        #         voxelid = gridpoint .+ Int32(1)
+        #         grid[group_idx, voxelid...]
+        #     end
+        #     for (j, sqrdist) in voxel
+        #         if filterj(j)
+        #             if sqrdist ≤ voxelcutoff_sqr
+        #                 # load other element
+        #                 if exists[j]
+        #                     y = group[j]
+        #                     @inline d2 = distSqr(x, y)
+        #                     if d2 ≤ cutoff_sqr 
+        #                         c_gridpoint = _canonicalGridPoint(x, y, s.grid_size, true)
+        #                         if gridpoint == c_gridpoint
+        #                             in_y = (y .* s.voxel_length) .+ (s.grid_start,)
+        #                             @inline output = f(in_x, in_y, i, j, d2*voxel_length_sqr, output)
+        #                         end
+        #                     end
+        #                 end
+        #             end
+        #         end
+        #     end
+        # end
     end
     return output
 end
