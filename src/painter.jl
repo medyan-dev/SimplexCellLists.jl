@@ -87,7 +87,7 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegro
 end
 
 
-"""
+"""$PUBLIC
 Alternate constructor.
     Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroups::Integer;
         min_point::SVector{3,<:AbstractFloat},

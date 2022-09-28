@@ -1,4 +1,4 @@
-# Test Painter
+# Test Painter against Naive methods.
 
 using StaticArrays
 using LinearAlgebra
@@ -12,28 +12,28 @@ Random.seed!(1234)
 @testset "just points" begin
     N = 100000
     points = rand(SVector{1,SVector{3,Float32}},N)
-    naive = SimplexCellLists.Naive(1, 0)
-    painter = SimplexCellLists.Painter(1,0;
+    naive = SimplexCellLists.Naive(1, 0, 0)
+    painter = SimplexCellLists.Painter(1,0,0;
         grid_start= SA[0.1,0.1,0.1],
         grid_size= SA[10,10,10],
         voxel_length= 1/10,
-        max_range= SA[[0.1],Float64[]],
+        max_range= 0.1,
     )
-    SimplexCellLists.setElements!(naive,[points],[])
-    SimplexCellLists.setElements!(painter,[points],[])
+    SimplexCellLists.setElements!(naive,[points],[],[])
+    SimplexCellLists.setElements!(painter,[points],[],[])
     SimplexCellLists.addElement!(naive,1,points[1])
     SimplexCellLists.addElement!(painter,1,points[1])
     delid = rand(1:(N+1))
-    SimplexCellLists.deleteElement!(painter, 1, delid, SimplexCellLists.Point)
-    SimplexCellLists.deleteElement!(naive, 1, delid, SimplexCellLists.Point)
+    SimplexCellLists.deactivate!(painter, 1, delid, SimplexCellLists.Point)
+    SimplexCellLists.deactivate!(naive, 1, delid, SimplexCellLists.Point)
     cutoff = 0.09f0
     f(x,y,i,j,d2,output) = output+((√(d2)-cutoff)^2)
     naive_out = SimplexCellLists.mapSimplexElements(
         f,
         0.0,
         naive,
-        1,
         points[1],
+        1,
         SimplexCellLists.Point,
         cutoff,
     )
@@ -41,8 +41,8 @@ Random.seed!(1234)
         f,
         0.0,
         painter,
-        1,
         points[1],
+        1,
         SimplexCellLists.Point,
         cutoff,
     )
@@ -54,21 +54,21 @@ end
         #@show trial
         N = 1000
         lines = rand(SVector{2,SVector{3,Float32}},N)
-        naive = SimplexCellLists.Naive(0, 1)
-        painter = SimplexCellLists.Painter(0, 1;
+        naive = SimplexCellLists.Naive(0, 1, 0)
+        painter = SimplexCellLists.Painter(0, 1, 0;
             grid_start= SA[0.0,0.0,0.0],
             grid_size= SA[10,10,10],
             voxel_length= 1/10,
-            max_range= SA[Float64[],Float64[0.1]],
+            max_range= 0.1,
         )
-        SimplexCellLists.setElements!(naive,[],[lines])
-        SimplexCellLists.setElements!(painter,[],[lines])
+        SimplexCellLists.setElements!(naive,[],[lines],[])
+        SimplexCellLists.setElements!(painter,[],[lines],[])
         SimplexCellLists.addElement!(naive,1,lines[1])
         SimplexCellLists.addElement!(painter,1,lines[1])
         push!(lines,lines[1])
         delid = rand(eachindex(lines))
-        SimplexCellLists.deleteElement!(painter, 1, delid, SimplexCellLists.Line)
-        SimplexCellLists.deleteElement!(naive, 1, delid, SimplexCellLists.Line)
+        SimplexCellLists.deactivate!(painter, 1, delid, SimplexCellLists.Line)
+        SimplexCellLists.deactivate!(naive, 1, delid, SimplexCellLists.Line)
         cutoff = 0.09f0
         function f!(x,y,i,j,d2,output)
             d2 = SimplexCellLists.distSqr(lines[1], lines[j])
@@ -81,8 +81,8 @@ end
             f!,
             zeros(length(lines)),
             naive,
-            1,
             lines[1],
+            1,
             SimplexCellLists.Line,
             cutoff,
         )
@@ -90,8 +90,8 @@ end
             f!,
             zeros(length(lines)),
             painter,
-            1,
             lines[1],
+            1,
             SimplexCellLists.Line,
             cutoff,
         )
@@ -105,15 +105,15 @@ end
         N = 1000
         lines = rand(SVector{2,SVector{3,Float32}},N)
         points = rand(SVector{1,SVector{3,Float32}},N)
-        naive = SimplexCellLists.Naive(1, 1)
-        painter = SimplexCellLists.Painter(1, 1;
+        naive = SimplexCellLists.Naive(1, 1, 0)
+        painter = SimplexCellLists.Painter(1, 1, 0;
             grid_start= SA[0.0,0.0,0.0],
             grid_size= SA[10,10,10],
             voxel_length= 1/10,
-            max_range= SA[Float64[0.1],Float64[0.1]],
+            max_range= 0.1,
         )
-        SimplexCellLists.setElements!(naive,[points],[lines])
-        SimplexCellLists.setElements!(painter,[points],[lines])
+        SimplexCellLists.setElements!(naive,[points],[lines],[])
+        SimplexCellLists.setElements!(painter,[points],[lines],[])
         SimplexCellLists.addElement!(naive,1,lines[1])
         SimplexCellLists.addElement!(painter,1,lines[1])
         SimplexCellLists.addElement!(naive,1,points[1])
@@ -139,8 +139,8 @@ end
             pointline_f!,
             zeros(length(lines)),
             naive,
-            1,
             points[1],
+            1,
             SimplexCellLists.Line,
             cutoff,
         )
@@ -148,8 +148,8 @@ end
             linepoint_f!,
             zeros(length(points)),
             naive,
-            1,
             lines[1],
+            1,
             SimplexCellLists.Point,
             cutoff,
         )
@@ -157,8 +157,8 @@ end
             pointline_f!,
             zeros(length(lines)),
             painter,
-            1,
             points[1],
+            1,
             SimplexCellLists.Line,
             cutoff,
         )
@@ -166,8 +166,8 @@ end
             linepoint_f!,
             zeros(length(points)),
             painter,
-            1,
             lines[1],
+            1,
             SimplexCellLists.Point,
             cutoff,
         )
@@ -178,11 +178,11 @@ end
 
 @testset "points and lines edge cases 1" begin
     cutoff = 1f-1
-    painter = SimplexCellLists.Painter(1, 0;
+    painter = SimplexCellLists.Painter(1, 0, 0;
         grid_start= SA[-5.0,-5.0,-5.0],
         grid_size= SA[10,10,10],
         voxel_length= 1.0,
-        max_range= SA[Float64[0.1],Float64[]],
+        max_range= SA[Float64[0.1],Float64[],Float64[]],
     )
     diag = SA_F32[1,1,1]
     diag_l = norm(diag)
@@ -196,8 +196,8 @@ end
         f,
         0,
         painter,
-        1,
         SA[line_a, line_b],
+        1,
         SimplexCellLists.Point,
         cutoff,
     )
@@ -206,11 +206,11 @@ end
 
 @testset "points and lines edge cases 2" begin
     cutoff = 1f-1
-    painter = SimplexCellLists.Painter(1, 0;
+    painter = SimplexCellLists.Painter(1, 0, 0;
         grid_start= SA[-5.0,-5.0,-5.0],
         grid_size= SA[10,10,10],
         voxel_length= 1.0,
-        max_range= SA[Float64[0.1],Float64[]],
+        max_range= 0.1,
     )
     diag = SA_F32[1,1,1]
     diag_l = norm(diag)
@@ -224,8 +224,8 @@ end
         f,
         0,
         painter,
-        1,
         SA[line_a, line_b],
+        1,
         SimplexCellLists.Point,
         cutoff,
     )
@@ -234,11 +234,11 @@ end
 
 @testset "points and lines edge cases 3" begin
     cutoff = 1f-1
-    painter = SimplexCellLists.Painter(1, 0;
+    painter = SimplexCellLists.Painter(1, 0, 0;
         grid_start= SA[-5.0,-5.0,-5.0],
         grid_size= SA[10,10,10],
         voxel_length= 1.0,
-        max_range= SA[Float64[0.1],Float64[]],
+        max_range= 0.1,
     )
     diag = SA_F32[1,1,1]
     diag_l = norm(diag)
@@ -252,8 +252,8 @@ end
         f,
         0,
         painter,
-        1,
         SA[line_a, line_b],
+        1,
         SimplexCellLists.Point,
         cutoff,
     )
@@ -262,11 +262,11 @@ end
 
 @testset "points and lines edge cases 4" begin
     cutoff = 1f-1
-    painter = SimplexCellLists.Painter(1, 0;
+    painter = SimplexCellLists.Painter(1, 0, 0;
         grid_start= SA[-5.0,-5.0,-5.0],
         grid_size= SA[10,10,10],
         voxel_length= 1.0,
-        max_range= SA[Float64[0.1],Float64[]],
+        max_range= 0.1,
     )
     diag = SA_F32[1,1,1]
     diag_l = norm(diag)
@@ -280,8 +280,8 @@ end
         f,
         0,
         painter,
-        1,
         SA[line_a, line_b],
+        1,
         SimplexCellLists.Point,
         cutoff,
     )
@@ -290,11 +290,11 @@ end
 
 @testset "parallel lines" begin
     cutoff = 2.5f0
-    painter = SimplexCellLists.Painter(0, 1;
+    painter = SimplexCellLists.Painter(0, 1, 0;
         grid_start= SA[-5.0,-5.0,-5.0],
         grid_size= SA[10,10,10],
         voxel_length= 1.0,
-        max_range= SA[Float64[],Float64[2.5f0]],
+        max_range= 2.5f0,
     )
     x = SA_F32[1,0,0]
     y = SA_F32[0,1,0]
@@ -305,8 +305,8 @@ end
         f,
         0,
         painter,
-        1,
         SA[-100x+y, 100x+y],
+        1,
         SimplexCellLists.Line,
         cutoff,
     )
@@ -315,11 +315,11 @@ end
 
 @testset "almost parallel lines that are closest outside the grid" begin
     cutoff = 2.5f0
-    painter = SimplexCellLists.Painter(0, 1;
+    painter = SimplexCellLists.Painter(0, 1, 0;
         grid_start= SA[-5.0,-5.0,-5.0],
         grid_size= SA[10,10,10],
         voxel_length= 1.0,
-        max_range= SA[Float64[],Float64[2.5f0]],
+        max_range= 2.5f0,
     )
     x = SA_F32[1,0,0]
     y = SA_F32[0,1,0]
@@ -330,8 +330,8 @@ end
         f,
         0,
         painter,
-        1,
         SA[-100x+y, 100x],
+        1,
         SimplexCellLists.Line,
         cutoff,
     )
@@ -340,11 +340,11 @@ end
 
 @testset "points outside the grid" begin
     cutoff = 1f-1
-    painter = SimplexCellLists.Painter(1, 0;
+    painter = SimplexCellLists.Painter(1, 0, 0;
         grid_start= SA[-5.0,-5.0,-5.0],
         grid_size= SA[10,10,10],
         voxel_length= 1.0,
-        max_range= SA[Float64[0.1],Float64[]],
+        max_range= 0.1,
     )
     x = SA_F32[1,0,0]
     y = SA_F32[0,1,0]
@@ -355,8 +355,8 @@ end
         f123,
         0,
         painter,
-        1,
         SA[-100.05f0x],
+        1,
         SimplexCellLists.Point,
         cutoff,
     )
@@ -366,31 +366,35 @@ end
 @testset "map pairs" begin
     for trial in 1:20
         N = 1000
+        triangles = trial .* rand(SVector{3,SVector{3,Float32}},N)
         lines = trial .* rand(SVector{2,SVector{3,Float32}},N)
         points = trial .* rand(SVector{1,SVector{3,Float32}},N)
-        naive = SimplexCellLists.Naive(1, 1)
-        painter = SimplexCellLists.Painter(1, 1;
+        naive = SimplexCellLists.Naive(1, 1, 1)
+        painter = SimplexCellLists.Painter(1, 1, 1;
             grid_start= SA[0.0,0.0,0.0],
             grid_size= SA[10,10,10],
             voxel_length= trial*1/10,
-            max_range= SA[Float64[trial*0.1],Float64[trial*0.1]],
+            max_range= trial*0.1,
         )
-        SimplexCellLists.setElements!(naive,[points],[lines])
-        SimplexCellLists.setElements!(painter,[points],[lines])
+        SimplexCellLists.setElements!(naive,[points],[lines],[triangles])
+        SimplexCellLists.setElements!(painter,[points],[lines],[triangles])
+        SimplexCellLists.addElement!(naive,1,triangles[1])
+        SimplexCellLists.addElement!(painter,1,triangles[1])
         SimplexCellLists.addElement!(naive,1,lines[1])
         SimplexCellLists.addElement!(painter,1,lines[1])
         SimplexCellLists.addElement!(naive,1,points[1])
         SimplexCellLists.addElement!(painter,1,points[1])
+        push!(triangles,triangles[1])
         push!(lines,lines[1])
         push!(points,points[1])
         delid = rand(eachindex(lines))
-        SimplexCellLists.deleteElement!(painter, 1, delid, SimplexCellLists.Line)
-        SimplexCellLists.deleteElement!(naive, 1, delid, SimplexCellLists.Line)
+        SimplexCellLists.deactivate!(painter, 1, delid, SimplexCellLists.Line)
+        SimplexCellLists.deactivate!(naive, 1, delid, SimplexCellLists.Line)
         cutoff = trial*0.099f0
         #@show trial
         function LLf!(x,y,i,j,d2,output)
             d2 = SimplexCellLists.distSqr(lines[i], lines[j])
-            if √(d2) < cutoff-1E-5
+            if √(d2) < cutoff-1E-3
                 output[i,j] += 1
                 output[j,i] += 1
             end
@@ -398,7 +402,7 @@ end
         end
         function LPf!(x,y,i,j,d2,output)
             d2 = SimplexCellLists.distSqr(lines[i], points[j])
-            if √(d2) < cutoff-1E-5
+            if √(d2) < cutoff-1E-3
                 output[i,j] += 1
                 output[j,i] += 1
             end
@@ -406,7 +410,7 @@ end
         end
         function PPf!(x,y,i,j,d2,output)
             d2 = SimplexCellLists.distSqr(points[i], points[j])
-            if √(d2) < cutoff-1E-5
+            if √(d2) < cutoff-1E-3
                 output[i,j] += 1
                 output[j,i] += 1
             end
@@ -476,6 +480,7 @@ end
                     d2 = SimplexCellLists.distSqr(lines[ind[1]], lines[ind[2]])
                     @show d2
                     @show √(d2)
+                    @show cutoff
                     println()
                 end
                 println()

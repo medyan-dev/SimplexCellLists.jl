@@ -1,8 +1,12 @@
-using SafeTestsets
+using TestItemRunner
 
-@safetestset "test min distances" begin include("test_mindistance.jl") end
+@run_package_tests
 
-@safetestset "test Naive" begin include("test_naive.jl") end
+@testitem "test min distances" begin include("test_mindistance.jl") end
 
-@safetestset "test Painter" begin include("test_painter.jl") end
+@testitem "test Naive" begin include("test_naive.jl") end
+
+@testitem "test Painter basic" begin include("test_painter-basic.jl") end
+
+@testitem "test Painter" begin include("test_painter.jl") end
 
