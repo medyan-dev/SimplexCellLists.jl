@@ -78,7 +78,7 @@ end
         @test out == zero(out)
     end
     @testset "mapSimplexElements tests" begin
-        for i in 1:10
+        for trial in 1:10
             scale = Float32(exp(rand()*8.0 - 4))
             rotation = rand(RotMatrix{3,Float32})
             translation = randn(SVector{3,Float32}) * scale

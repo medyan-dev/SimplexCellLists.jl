@@ -7,7 +7,7 @@ A grid is painted with element ids based on a max range. Based on the ideas in "
         grid_start::SVector{3,<:AbstractFloat},
         grid_size::SVector{3,<:Integer},
         voxel_length::AbstractFloat,
-        max_range::SVector{3, <:Vector{<:AbstractFloat}},
+        max_range::Union{SVector{3, <:Vector{<:AbstractFloat}}, AbstractFloat},
     )
 
 Where `numpointgroups` is the number of groups of points, `numlinegroups` is the number of groups of lines,
@@ -20,7 +20,7 @@ and another corner at `(grid_start .- voxel_length/2) + grid_size*voxel_length`
 
 Elements can safely be outside of the grid, but a large number of elements outside the grid will degrade performance.
 
-`max_range` is the max cutoff that can be used when using the mapping functions. It is specified per group.
+`max_range` is the max cutoff that can be used when using the mapping functions. It is specified per group, or for all groups.
 
 When `mapElementsElements` is used, the cutoff just has to be less than the `max_range` of the `y` group.
 
@@ -59,11 +59,17 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegro
         grid_start::SVector{3,<:AbstractFloat},
         grid_size::SVector{3,<:Integer},
         voxel_length::AbstractFloat,
-        max_range::SVector{3, <:Vector{<:AbstractFloat}},
+        max_range::Union{SVector{3, <:Vector{<:AbstractFloat}}, AbstractFloat},
     )
-    @argcheck length(max_range[1]) == numpointgroups
-    @argcheck length(max_range[2]) == numlinegroups
-    @argcheck length(max_range[3]) == numtrianglegroups
+    @argcheck voxel_length > 0
+    _max_range = if max_range isa AbstractFloat
+        [fill(max_range,n) for n in (numpointgroups, numlinegroups, numtrianglegroups)]
+    else
+        @argcheck length(max_range[1]) == numpointgroups
+        @argcheck length(max_range[2]) == numlinegroups
+        @argcheck length(max_range[3]) == numtrianglegroups
+        max_range
+    end
     pointgrid = [Tuple{Int32, Float32}[] for i in 1:numpointgroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
     linegrid = [Tuple{Int32, Float32}[] for i in 1:numlinegroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
     trianglegrid = [Tuple{Int32, Float32}[] for i in 1:numtrianglegroups, j in 1:grid_size[1], k in 1:grid_size[2], l in 1:grid_size[3]]
@@ -72,11 +78,40 @@ function Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegro
         grid_size,
         voxel_length,
         inv(voxel_length),
-        max_range .* inv(voxel_length),
+        _max_range .* inv(voxel_length),
         SA[pointgrid, linegrid, trianglegrid],
         SA[[Tuple{Int32, Float32}[] for i in 1:numpointgroups], [Tuple{Int32, Float32}[] for i in 1:numlinegroups], [Tuple{Int32, Float32}[] for i in 1:numtrianglegroups]], 
         ([Point[] for i in 1:numpointgroups], [Line[] for i in 1:numlinegroups], [Triangle[] for i in 1:numtrianglegroups]),
         ([Bool[] for i in 1:numpointgroups], [Bool[] for i in 1:numlinegroups], [Bool[] for i in 1:numtrianglegroups]),
+    )
+end
+
+
+"""
+Alternate constructor.
+    Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroups::Integer;
+        min_point::SVector{3,<:AbstractFloat},
+        max_point::SVector{3,<:AbstractFloat},
+        voxel_length::AbstractFloat,
+        max_range::SVector{3, <:Vector{<:AbstractFloat}},
+    )
+"""
+function Painter(numpointgroups::Integer, numlinegroups::Integer, numtrianglegroups::Integer;
+        min_point::SVector{3,<:AbstractFloat},
+        max_point::SVector{3,<:AbstractFloat},
+        voxel_length::AbstractFloat,
+        max_range::SVector{3, <:Vector{<:AbstractFloat}},
+    )
+    @argcheck all(max_point .≥ min_point)
+    grid_size = max.(ceil.(Int32, (max_point-min_point) ./ voxel_length), Int32(1))
+    real_grid_size = grid_size .* voxel_length
+    grid_center = (1//2)*(max_point + min_point)
+    grid_start = grid_center - (1//2)*real_grid_size .+ (1//2)*voxel_length
+    Painter(numpointgroups, numlinegroups, numtrianglegroups;
+        grid_start,
+        grid_size,
+        voxel_length,
+        max_range,
     )
 end
 
@@ -125,7 +160,7 @@ function _paintElement(s::Painter, groupid, i, element::Simplex{N}, max_range) w
         @inline voxel_float = SVector{3,Float32}(voxel_int...)
         @inline d2 = distSqr(SA[voxel_float,], element)
         if d2 ≤ voxelcutoff2
-            if any(voxel_int .> (m.grid_size .- Int32(1))) || any(voxel_int .< Int32(0))
+            if any(voxel_int .> (s.grid_size .- Int32(1))) || any(voxel_int .< Int32(0))
                 min_outside_d2 = min(min_outside_d2, d2)
             else
                 voxelid = voxel_int .+ Int32(1)
@@ -464,6 +499,7 @@ function mapSimplexElements(
             usemidpoint = true
         end
     end
+    # @show usemidpoint
     if usemidpoint
         voxel = if isnothing(midgridpoint)
             outsidegrid[group_idx]
@@ -496,18 +532,19 @@ function mapSimplexElements(
         bottom = min.(x...)
         top = max.(x...)
         maxabs = max.(abs.(top),abs.(bottom))
-        error_est = 32*eps(max(maxabs))
+        error_est = 32*eps(maximum(maxabs))
         top_extend_int = round.(Int32, top .+ error_est)
         bottom_extend_int = round.(Int32, bottom .- error_est)
         check_outside = false
-        if any(top_extend_int .> (m.grid_size .- Int32(1))) || any(bottom_extend_int .< Int32(0))
+        if any(top_extend_int .> (s.grid_size .- Int32(1))) || any(bottom_extend_int .< Int32(0))
             check_outside = true
-            top_extend_int = clamp.(top_extend_int, Int32(0), (m.grid_size .- Int32(1)))
-            bottom_extend_int = clamp.(bottom_extend_int, Int32(0), (m.grid_size .- Int32(1)))
+            top_extend_int = clamp.(top_extend_int, Int32(0), (s.grid_size .- Int32(1)))
+            bottom_extend_int = clamp.(bottom_extend_int, Int32(0), (s.grid_size .- Int32(1)))
         end
         samplevoxelcutoff = Float32(1//2*√(3)) + error_est + MAX_SAMPLE_SPACING
         samplevoxelcutoff2 = samplevoxelcutoff^2
-        for gridpoint in Iterators.flatten((nothing, Iterators.product(range.(bottom_extend_int,top_extend_int)...)))
+        for gridpoint_tuple in Iterators.flatten(((nothing,), Iterators.product(range.(bottom_extend_int,top_extend_int)...)))
+            gridpoint = isnothing(gridpoint_tuple) ? nothing : SVector(gridpoint_tuple)
             # if gridpoint is outside but we don't need to check outside, skip
             if isnothing(gridpoint) && !check_outside
                 continue
