@@ -1,6 +1,7 @@
 # SimplexCellLists WIP
 
 [![Build Status](https://github.com/medyan-dev/SimplexCellLists.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/medyan-dev/SimplexCellLists.jl/actions/workflows/CI.yml?query=branch%3Amain)
+![Julia Support](https://img.shields.io/badge/Julia-1.8-blue)
 
 This Julia package accelerates computations on all pairs of 3D points, line segments, and triangles within a cutoff distance.
 
