@@ -34,5 +34,23 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v1
+      - name: Develop packages
+        run: |
+          julia --project=test -e '
+            using Pkg
+            Pkg.develop([PackageSpec(path=pwd())])
+            Pkg.instantiate()'
       - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+        with:
+          project: test
+      - name: Print package status
+        run: |
+          julia --project=test -e '
+            using InteractiveUtils
+            versioninfo()
+            using Pkg
+            Pkg.status(;mode=Pkg.PKGMODE_MANIFEST)'
+      - name: Run tests
+        run: |
+          cd test && 
+          julia --project --color=yes --depwarn=yes --warn-overwrite=yes --warn-scope=yes --check-bounds=yes --compiled-modules=no  runtests.jl 

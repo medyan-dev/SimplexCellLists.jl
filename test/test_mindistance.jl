@@ -115,9 +115,10 @@ end
     ]
     ref_d2min = refDist2(a,b)
     d2min = SimplexCellLists.dist2LineTriangle(a,b)
-    # This test is broken due to an issue with Clarabel.jl
+    # This test was broken due to an issue with Clarabel.jl
     # See https://github.com/oxfordcontrol/Clarabel.jl/issues/103
-    @test_broken ref_d2min ≈ d2min atol = 1E-11 rtol = 1E-11
+    # This issue was resolved in https://github.com/oxfordcontrol/Clarabel.jl/pull/114
+    @test ref_d2min ≈ d2min atol = 1E-11 rtol = 1E-11
 end
     
 
