@@ -1,4 +1,6 @@
-include("test-util.jl")
+using Aqua: Aqua
+using SimplexCellLists: SimplexCellLists
+Aqua.test_all(SimplexCellLists)
 
 include("test-mindistance.jl")
 

@@ -12,8 +12,6 @@ const Triangle = Simplex{3}
 public Vec3, Simplex, Point, LineSeg, Triangle
 
 include("util.jl")
-export ball_intersects_unit_cube
-export ball_intersects_biunit_cube
 
 include("distances.jl")
 export dist_sqr
