@@ -31,10 +31,10 @@ function map_nearby_points_naive(
     cutoff ≤ 0 && return out
     cutoff2 = cutoff * cutoff
     for i in eachindex(positions, ids)
-        diff = pos - positions[i]
-        dist2 = diff ⋅ diff
+        sep = positions[i] - pos
+        dist2 = sep ⋅ sep
         if dist2 ≤ cutoff2
-            out, cont = f(CellPointEntry{Int64,Float32}(positions[i], ids[i]), out)
+            out, cont = f(CellPointEntry{Int64,Float32}(positions[i], ids[i]), sep, out)
             cont || return out
         end
     end
@@ -54,7 +54,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         @test_throws ArgumentError PointCellList{Int64,Float32}((-1,4,4), 2.0f0)
         # A zero-size axis makes an empty grid: queries find nothing.
         pcl = PointCellList{Int64,Float32}((0,4,4), 2.0f0)
-        count = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 1.0f0, 0) do entry, out
+        count = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 1.0f0, 0) do entry, sep, out
             out + 1, true
         end
         @test count == 0
@@ -154,7 +154,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         pos = SA[0.5f0, 0.5f0, 0.5f0]
         cell_point_add!(pcl, pos, Int64(10))
         cell_point_add!(pcl, pos, Int64(20))
-        count = map_nearby_points(pcl, pos, 0.1f0, 0) do entry, out
+        count = map_nearby_points(pcl, pos, 0.1f0, 0) do entry, sep, out
             out + 1, true
         end
         @test count == 2
@@ -187,7 +187,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
     @testset "map_nearby_points" begin
         @testset "empty" begin
             pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
-            count = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 0.5f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 0.5f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 0
@@ -196,7 +196,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         @testset "single point found" begin
             pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_point_add!(pcl, SA[0.5f0, 0.5f0, 0.5f0], Int64(1))
-            count = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 0.5f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 0.5f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -205,7 +205,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         @testset "no matches - outside cutoff" begin
             pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_point_add!(pcl, SA[0.5f0, 0.5f0, 0.5f0], Int64(1))
-            count = map_nearby_points(pcl, SA[-3.0f0, -3.0f0, -3.0f0], 0.5f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[-3.0f0, -3.0f0, -3.0f0], 0.5f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 0
@@ -215,7 +215,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
             pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_point_add!(pcl, SA[0.5f0, 0.5f0, 0.5f0], Int64(1))
             cell_point_add!(pcl, SA[0.6f0, 0.5f0, 0.5f0], Int64(2))
-            count = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 1.0f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 1.0f0, 0) do entry, sep, out
                 out + 1, false
             end
             @test count == 1
@@ -225,7 +225,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
             pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
             # Point just inside cell (1,2,2), query just inside cell (2,2,2)
             cell_point_add!(pcl, SA[-0.1f0, 0.5f0, 0.5f0], Int64(1))
-            count = map_nearby_points(pcl, SA[0.1f0, 0.5f0, 0.5f0], 0.5f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[0.1f0, 0.5f0, 0.5f0], 0.5f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -236,7 +236,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
             # Grid covers [-4,4). Point near edge.
             cell_point_add!(pcl, SA[3.5f0, 3.5f0, 3.5f0], Int64(1))
             # Query from outside grid, distance = 1.0
-            count = map_nearby_points(pcl, SA[4.5f0, 3.5f0, 3.5f0], 2.0f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[4.5f0, 3.5f0, 3.5f0], 2.0f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -246,13 +246,13 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
             pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
             # Grid covers [-4,4). Point and query are both beyond the +x face.
             cell_point_add!(pcl, SA[10.0f0, 0.5f0, 0.5f0], Int64(1))
-            count = map_nearby_points(pcl, SA[11.0f0, 0.5f0, 0.5f0], 2.0f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[11.0f0, 0.5f0, 0.5f0], 2.0f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
             # The same query must not return an outside point beyond the cutoff.
             cell_point_add!(pcl, SA[11.0f0, 0.5f0, 30.0f0], Int64(2))
-            count = map_nearby_points(pcl, SA[11.0f0, 0.5f0, 0.5f0], 2.0f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[11.0f0, 0.5f0, 0.5f0], 2.0f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -263,7 +263,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
             # Points near the low-x boundary of the grid
             cell_point_add!(pcl, SA[-3.5f0, 0.5f0, 0.5f0], Int64(1))
             # Query with large cutoff that extends past grid boundary on -x side
-            count = map_nearby_points(pcl, SA[-2.5f0, 0.5f0, 0.5f0], 3.0f0, 0) do entry, out
+            count = map_nearby_points(pcl, SA[-2.5f0, 0.5f0, 0.5f0], 3.0f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -272,10 +272,22 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         @testset "zero cutoff returns out" begin
             pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_point_add!(pcl, SA[0.5f0, 0.5f0, 0.5f0], Int64(1))
-            result = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 0.0f0, 42) do entry, out
+            result = map_nearby_points(pcl, SA[0.5f0, 0.5f0, 0.5f0], 0.0f0, 42) do entry, sep, out
                 out + 1, true
             end
             @test result == 42
+        end
+
+        @testset "sep argument" begin
+            pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
+            p = SA[0.5f0, 0.25f0, -0.75f0]
+            cell_point_add!(pcl, p, Int64(1))
+            q = SA[0.25f0, 0.5f0, -0.5f0]
+            seps = map_nearby_points(pcl, q, 1.0f0, SVector{3,Float32}[]) do entry, sep, out
+                push!(out, sep)
+                out, true
+            end
+            @test seps == [p - q]
         end
 
         @testset "brute force comparison" begin
@@ -289,7 +301,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
                     cell_point_add!(pcl, positions[i], Int64(i))
                 end
 
-                function collect_id(entry, out)
+                function collect_id(entry, sep, out)
                     push!(out, entry.id)
                     out, true
                 end

@@ -25,7 +25,7 @@ end
 function count_nearby(scl::LineSegCellList{Int64,Float32}, points, cutoff::Float32)
     total = 0
     for pos in points
-        total = map_nearby_line_segs((entry, out) -> (out + 1, true), scl, pos, cutoff, total)
+        total = map_nearby_line_segs((entry, sep, out) -> (out + 1, true), scl, pos, cutoff, total)
     end
     total
 end
@@ -40,7 +40,7 @@ end
 function count_nearby(pcl::PointCellList{Int64,Float32}, points, cutoff::Float32)
     total = 0
     for pos in points
-        total = map_nearby_points((entry, out) -> (out + 1, true), pcl, pos, cutoff, total)
+        total = map_nearby_points((entry, sep, out) -> (out + 1, true), pcl, pos, cutoff, total)
     end
     total
 end

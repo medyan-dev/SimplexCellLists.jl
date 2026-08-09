@@ -64,7 +64,7 @@ end
         @test_throws ArgumentError LineSegCellList{Int64,Float32}((-1,4,4), 2.0f0)
         # A zero-size axis makes an empty grid: queries find nothing, adds throw.
         scl = LineSegCellList{Int64,Float32}((0,4,4), 2.0f0)
-        count = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 0.5f0], 1.0f0, 0) do entry, out
+        count = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 0.5f0], 1.0f0, 0) do entry, sep, out
             out + 1, true
         end
         @test count == 0
@@ -136,7 +136,7 @@ end
         @test e.tmin == 0
         @test cell_line_seg_tmax(e) == 0
         @test cell_line_seg_is_end(e)
-        count = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 1.0f0], 1.0f0, 0) do entry, out
+        count = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 1.0f0], 1.0f0, 0) do entry, sep, out
             out + 1, true
         end
         @test count == 1
@@ -179,7 +179,7 @@ end
         p1 = SA[1.5f0, 0.5f0, 0.5f0]
         cell_line_seg_add!(scl, p0, p1, Int64(10))
         cell_line_seg_add!(scl, p0, p1, Int64(20))
-        count = map_nearby_line_segs(scl, p0, 0.1f0, 0) do entry, out
+        count = map_nearby_line_segs(scl, p0, 0.1f0, 0) do entry, sep, out
             out + 1, true
         end
         @test count == 2
@@ -225,7 +225,7 @@ end
     @testset "map_nearby_line_segs" begin
         @testset "empty" begin
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
-            count = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 0.5f0], 0.5f0, 0) do entry, out
+            count = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 0.5f0], 0.5f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 0
@@ -234,7 +234,7 @@ end
         @testset "single segment found" begin
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_line_seg_add!(scl, SA[0.3f0, 0.5f0, 0.5f0], SA[1.2f0, 0.5f0, 0.5f0], Int64(1))
-            count = map_nearby_line_segs(scl, SA[0.7f0, 0.9f0, 0.5f0], 0.5f0, 0) do entry, out
+            count = map_nearby_line_segs(scl, SA[0.7f0, 0.9f0, 0.5f0], 0.5f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -243,7 +243,7 @@ end
         @testset "no matches - outside cutoff" begin
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_line_seg_add!(scl, SA[0.3f0, 0.5f0, 0.5f0], SA[1.2f0, 0.5f0, 0.5f0], Int64(1))
-            count = map_nearby_line_segs(scl, SA[-3.0f0, -3.0f0, -3.0f0], 0.5f0, 0) do entry, out
+            count = map_nearby_line_segs(scl, SA[-3.0f0, -3.0f0, -3.0f0], 0.5f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 0
@@ -253,7 +253,7 @@ end
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_line_seg_add!(scl, SA[0.3f0, 0.5f0, 0.5f0], SA[1.2f0, 0.5f0, 0.5f0], Int64(1))
             cell_line_seg_add!(scl, SA[0.3f0, 0.6f0, 0.5f0], SA[1.2f0, 0.6f0, 0.5f0], Int64(2))
-            count = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 0.5f0], 1.0f0, 0) do entry, out
+            count = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 0.5f0], 1.0f0, 0) do entry, sep, out
                 out + 1, false
             end
             @test count == 1
@@ -263,7 +263,7 @@ end
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_line_seg_add!(scl, SA[-3.5f0, -3.5f0, -3.5f0], SA[3.5f0, 3.5f0, 3.5f0], Int64(1))
             # cutoff big enough that every cell the segment touches is visited
-            ids = map_nearby_line_segs(scl, SA[0.0f0, 0.0f0, 0.0f0], 20.0f0, Int64[]) do entry, out
+            ids = map_nearby_line_segs(scl, SA[0.0f0, 0.0f0, 0.0f0], 20.0f0, Int64[]) do entry, sep, out
                 push!(out, entry.id)
                 out, true
             end
@@ -274,7 +274,7 @@ end
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
             # Segment just inside x-cell 1, query just inside x-cell 2
             cell_line_seg_add!(scl, SA[-0.1f0, 0.5f0, 0.5f0], SA[-0.1f0, 1.5f0, 0.5f0], Int64(1))
-            count = map_nearby_line_segs(scl, SA[0.1f0, 1.0f0, 0.5f0], 0.5f0, 0) do entry, out
+            count = map_nearby_line_segs(scl, SA[0.1f0, 1.0f0, 0.5f0], 0.5f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -283,7 +283,7 @@ end
         @testset "query from outside grid finds nearby segment" begin
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_line_seg_add!(scl, SA[3.5f0, 3.0f0, 3.5f0], SA[3.5f0, 3.8f0, 3.5f0], Int64(1))
-            count = map_nearby_line_segs(scl, SA[4.5f0, 3.5f0, 3.5f0], 2.0f0, 0) do entry, out
+            count = map_nearby_line_segs(scl, SA[4.5f0, 3.5f0, 3.5f0], 2.0f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -293,13 +293,13 @@ end
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
             # Grid covers [-4,4). Segment and query are both beyond the +x face.
             cell_line_seg_add!(scl, SA[10.0f0, 0.5f0, 0.5f0], SA[12.0f0, 0.5f0, 0.5f0], Int64(1))
-            count = map_nearby_line_segs(scl, SA[11.0f0, 0.5f0, 1.5f0], 2.0f0, 0) do entry, out
+            count = map_nearby_line_segs(scl, SA[11.0f0, 0.5f0, 1.5f0], 2.0f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
             # The same query must not return an outside segment beyond the cutoff.
             cell_line_seg_add!(scl, SA[10.0f0, 0.5f0, 30.0f0], SA[12.0f0, 0.5f0, 30.0f0], Int64(2))
-            count = map_nearby_line_segs(scl, SA[11.0f0, 0.5f0, 1.5f0], 2.0f0, 0) do entry, out
+            count = map_nearby_line_segs(scl, SA[11.0f0, 0.5f0, 1.5f0], 2.0f0, 0) do entry, sep, out
                 out + 1, true
             end
             @test count == 1
@@ -309,11 +309,23 @@ end
             scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
             cell_line_seg_add!(scl, SA[0.3f0, 0.5f0, 0.5f0], SA[1.2f0, 0.5f0, 0.5f0], Int64(1))
             for cutoff in (0.0f0, -1.0f0)
-                result = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 0.5f0], cutoff, 42) do entry, out
+                result = map_nearby_line_segs(scl, SA[0.5f0, 0.5f0, 0.5f0], cutoff, 42) do entry, sep, out
                     out + 1, true
                 end
                 @test result == 42
             end
+        end
+
+        @testset "sep argument" begin
+            scl = LineSegCellList{Int64,Float32}((4,4,4), 2.0f0)
+            cell_line_seg_add!(scl, SA[-1.0f0, 0.0f0, 0.0f0], SA[1.0f0, 0.0f0, 0.0f0], Int64(1))
+            # the closest point on the line segment to q is (0.5, 0, 0)
+            q = SA[0.5f0, 0.75f0, 0.0f0]
+            seps = map_nearby_line_segs(scl, q, 1.0f0, SVector{3,Float32}[]) do entry, sep, out
+                push!(out, sep)
+                out, true
+            end
+            @test seps ≈ [SA[0.0f0, -0.75f0, 0.0f0]]
         end
 
         @testset "brute force comparison" begin
@@ -341,7 +353,7 @@ end
                     cutoff = Float32(rand()) * 8f0
                     cutoff2 = cutoff * cutoff
                     q = rand(SVector{3,Float32}) .* 24f0 .- 12f0
-                    cell_ids = map_nearby_line_segs(scl, q, cutoff, Int64[]) do entry, out
+                    cell_ids = map_nearby_line_segs(scl, q, cutoff, Int64[]) do entry, sep, out
                         push!(out, entry.id)
                         out, true
                     end

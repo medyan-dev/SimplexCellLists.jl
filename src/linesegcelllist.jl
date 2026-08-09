@@ -189,7 +189,9 @@ Call `f` for every line segment in `scl` whose closest point to `pos` is within 
 Each line segment is reported exactly once (deduplicated across cells).
 
 # Arguments
-- `f(entry::CellLineSegEntry{T,F}, out) -> (out, cont::Bool)`: callback called for each nearby line segment.
+- `f(entry::CellLineSegEntry{T,F}, sep::SVector{3,F}, out) -> (out, cont::Bool)`: callback called
+  for each nearby line segment. `sep` is the separation vector from `pos` to the closest point on the
+  line segment.
   Return `(new_out, true)` to continue, or `(new_out, false)` to stop early.
 - `scl`: the line segment cell list to query.
 - `pos`: query point.
@@ -244,14 +246,14 @@ function map_nearby_line_segs(
                     tmax = cell_line_seg_tmax(entry)
                     pos_m_p0 = pos - entry.p0
                     t = clamp(pos_m_p0 ⋅ entry.d_hat, zero(F), tmax)
-                    # distance check
-                    diff = t * entry.d_hat - pos_m_p0
-                    d2 = diff ⋅ diff
+                    # distance check.
+                    sep = t * entry.d_hat - pos_m_p0
+                    d2 = sep ⋅ sep
                     d2 ≤ cutoff2 || continue
                     # ownership check: tmin ≤ t < tmax, or is_end
                     t ≥ entry.tmin || continue
                     (t < tmax || cell_line_seg_is_end(entry)) || continue
-                    out, cont = f(entry, out)
+                    out, cont = f(entry, sep, out)
                     cont || return out
                 end
             end

@@ -122,7 +122,8 @@ end
 Call `f` for every point in `pcl` within `cutoff` distance of `pos`.
 
 # Arguments
-- `f(entry::CellPointEntry{T,F}, out) -> (out, cont::Bool)`: callback called for each nearby point.
+- `f(entry::CellPointEntry{T,F}, sep::SVector{3,F}, out) -> (out, cont::Bool)`: callback called
+  for each nearby point. `sep` is the separation vector from `pos` to the point (`entry.pos - pos`).
   Return `(new_out, true)` to continue, or `(new_out, false)` to stop early.
 - `pcl`: the point cell list to query.
 - `pos`: query point.
@@ -175,10 +176,10 @@ function map_nearby_points(
                 cs = @inbounds pcl.cells[begin + li]
                 for j in 1:cs.len
                     entry = @inbounds cs.list[j]
-                    diff = entry.pos - pos
-                    d2 = diff ⋅ diff
+                    sep = entry.pos - pos
+                    d2 = sep ⋅ sep
                     d2 ≤ cutoff2 || continue
-                    out, cont = f(entry, out)
+                    out, cont = f(entry, sep, out)
                     cont || return out
                 end
             end
