@@ -32,7 +32,8 @@ function _cell_push_entry!(old::CELLTYPE, entry::ENTRYTYPE) where {CELLTYPE,ENTR
     else
         old_list
     end
-    list[len+1] = entry
+    # len+1 ≤ length(list) because the branch above grows the list past len.
+    @inbounds list[len+1] = entry
     CELLTYPE(list, len+1)
 end
 
@@ -109,7 +110,9 @@ function cell_point_add!(pcl::PointCellList{T,F}, pos::SVector{3, F}, id::T)::No
     i = round2grid(pos_norm, sz)
     li = i ⋅ strides
     entry = CellPointEntry{T,F}(pos, id)
-    pcl.cells[begin + li] = _cell_push_entry!(pcl.cells[begin + li], entry)
+    # li is inbounds because pos_norm is clamped to the grid, and cells has
+    # length prod(sz).
+    @inbounds pcl.cells[begin + li] = _cell_push_entry!(pcl.cells[begin + li], entry)
     nothing
 end
 
@@ -149,21 +152,29 @@ function map_nearby_points(
     r_cells = cutoff * h2_inv
     lo = round2grid(max.(pos_norm .- r_cells, -F.(sz)), sz)
     hi = round2grid(min.(pos_norm .+ r_cells, prevfloat.(F.(sz))), sz)
+    r2_cells = r_cells * r_cells
+    # The per-axis terms of the ball-to-cube distance test are hoisted to
+    # their loop levels so the z and y contributions are not recomputed for
+    # every cell.
     for iz in lo[3]:hi[3]
         liz = iz*strides[3]
         cell_center_z = 2*iz + 1 - sz[3]
+        dz2 = relu(abs(pos_norm[3] - cell_center_z) - one(F))^2
         for iy in lo[2]:hi[2]
             liy = iy*strides[2]
             cell_center_y = 2*iy + 1 - sz[2]
+            dyz2 = dz2 + relu(abs(pos_norm[2] - cell_center_y) - one(F))^2
             for ix in lo[1]:hi[1]
-                lix = ix
                 cell_center_x = 2*ix + 1 - sz[1]
-                li = lix + liy + liz
-                cell_center = SVector{3, F}(cell_center_x, cell_center_y, cell_center_z)
-                @inline ball_intersects_biunit_cube(pos_norm - cell_center, r_cells) || continue
-                cs = pcl.cells[begin + li]
+                dxyz2 = dyz2 + relu(abs(pos_norm[1] - cell_center_x) - one(F))^2
+                dxyz2 ≤ r2_cells || continue
+                li = ix + liy + liz
+                # li is inbounds because lo and hi are clamped to the grid,
+                # and cells has length prod(sz). cs.len ≤ length(cs.list) is
+                # a _cell_push_entry! invariant.
+                cs = @inbounds pcl.cells[begin + li]
                 for j in 1:cs.len
-                    entry = cs.list[j]
+                    entry = @inbounds cs.list[j]
                     diff = pos - entry.pos
                     d2 = diff ⋅ diff
                     d2 ≤ cutoff2 || continue

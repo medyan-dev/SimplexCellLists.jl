@@ -157,7 +157,10 @@ function cell_line_seg_add!(scl::LineSegCellList{T,F}, p0::SVector{3, F}, p1::SV
         t_exit = min(tMax_1, tMax_2, tMax_3, seg_len)
         is_last = !(t_exit < seg_len)
         entry = CellLineSegEntry{T,F}(id, is_last, p0, d_hat, t_prev, t_exit)
-        scl.cells[begin + li] = _cell_push_entry!(scl.cells[begin + li], entry)
+        # li is inbounds because the start cell is clamped into the grid and
+        # the wall checks above stop stepping at the boundaries, so X, Y, Z
+        # stay in [0, sz-1].
+        @inbounds scl.cells[begin + li] = _cell_push_entry!(scl.cells[begin + li], entry)
         is_last && break
         # Step to next cell: advance the axis with smallest tMax.
         t_prev = t_exit
@@ -214,32 +217,40 @@ function map_nearby_line_segs(
     r_cells = cutoff * h2_inv
     lo = round2grid(max.(pos_norm .- r_cells, -F.(sz)), sz)
     hi = round2grid(min.(pos_norm .+ r_cells, prevfloat.(F.(sz))), sz)
+    r2_cells = r_cells * r_cells
+    # The per-axis terms of the ball-to-cube distance test are hoisted to
+    # their loop levels so the z and y contributions are not recomputed for
+    # every cell.
     for iz in lo[3]:hi[3]
         liz = iz*strides[3]
         cell_center_z = 2*iz + 1 - sz[3]
+        dz2 = relu(abs(pos_norm[3] - cell_center_z) - one(F))^2
         for iy in lo[2]:hi[2]
             liy = iy*strides[2]
             cell_center_y = 2*iy + 1 - sz[2]
+            dyz2 = dz2 + relu(abs(pos_norm[2] - cell_center_y) - one(F))^2
             for ix in lo[1]:hi[1]
-                lix = ix
                 cell_center_x = 2*ix + 1 - sz[1]
-                li = lix + liy + liz
-                cell_center = SVector{3, F}(cell_center_x, cell_center_y, cell_center_z)
-                @inline ball_intersects_biunit_cube(pos_norm - cell_center, r_cells) || continue
-                cs = scl.cells[begin + li]
+                dxyz2 = dyz2 + relu(abs(pos_norm[1] - cell_center_x) - one(F))^2
+                dxyz2 ≤ r2_cells || continue
+                li = ix + liy + liz
+                # li is inbounds because lo and hi are clamped to the grid,
+                # and cells has length prod(sz). cs.len ≤ length(cs.list) is
+                # a _cell_push_entry! invariant.
+                cs = @inbounds scl.cells[begin + li]
                 for j in 1:cs.len
-                    entry = cs.list[j]
+                    entry = @inbounds cs.list[j]
                     # closest point parameter on the whole line segment
                     tmax = cell_line_seg_tmax(entry)
                     pos_m_p0 = pos - entry.p0
                     t = clamp(pos_m_p0 ⋅ entry.d_hat, zero(F), tmax)
-                    # ownership check: tmin ≤ t < tmax, or is_end
-                    t ≥ entry.tmin || continue
-                    (t < tmax || cell_line_seg_is_end(entry)) || continue
                     # distance check
                     diff = pos_m_p0 - t * entry.d_hat
                     d2 = diff ⋅ diff
                     d2 ≤ cutoff2 || continue
+                    # ownership check: tmin ≤ t < tmax, or is_end
+                    t ≥ entry.tmin || continue
+                    (t < tmax || cell_line_seg_is_end(entry)) || continue
                     out, cont = f(entry, out)
                     cont || return out
                 end
