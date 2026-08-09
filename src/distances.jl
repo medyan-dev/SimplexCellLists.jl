@@ -1,13 +1,20 @@
 """
     dist_sqr_r_s_t(x::Simplex{N,T}, y::Simplex{M,T})::Tuple{T, Vec3{T}, SVector{N-1,T}, SVector{M-1,T}}
 
-Return a tuple of:
-1. the minimum squared distance between the two simplexes.
-2. the minimum distance vector from x to y.
-3. the barycentric coordinates on x.
-4. the barycentric coordinates on y.
+Return a tuple `(d², r, s, t)` of:
+1. `d²`: the minimum squared distance between the two simplexes.
+2. `r`: the minimum separation vector, pointing from the closest point on `x` to the closest point on `y`.
+3. `s`: the barycentric coordinates of the closest point on `x`.
+4. `t`: the barycentric coordinates of the closest point on `y`.
 
-TODO: better docs for what s and t are.
+`s` holds the barycentric weights of vertices `x[2:N]`; the weight of `x[1]`
+is implied as `1 - sum(s)`, so the closest point on `x` is:
+
+    (1 - sum(s))*x[1] + sum(s[i]*x[i+1] for i in 1:N-1)
+
+Each weight is in `[0, 1]` with `sum(s) ≤ 1`. For a `Point`, `s` is empty;
+for a `LineSeg`, the closest point is `(1 - s[1])*x[1] + s[1]*x[2]`.
+`t` works the same way for `y`.
 """
 function dist_sqr_r_s_t end
 
