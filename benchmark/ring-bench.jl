@@ -1,60 +1,89 @@
-using BenchmarkTools
-using JET
+using Chairmarks
+using Random
 using SimplexCellLists
 using StaticArrays
-using HDF5
-import H5Zblosc
 
-function setup()
-    file = h5open(joinpath(@__DIR__, "ringsystemsnapshot.h5"), "r")
+function load_cylinders()
+    data = read(joinpath(@__DIR__, "ring-system-line-segs-f32.bin"))
+    cylinders = collect(reinterpret(SimplexCellLists.LineSeg{Float32}, data))
+    # center
+    cylinders .+= (SA[SA[-2000,-2000,-200], SA[-2000,-2000,-200]],)
+    cylinders
+end
 
-    nodepositions = read(file["filaments/1/nodepositions"])
-    numcylinders = read(file["filaments/1/num_cylinders"])
-    numfilaments = length(numcylinders)
+# Grid dimensions are 4000 nm by 4000 nm by 400 nm
+# Benchmark building and query time with 50 nm, 100 nm, and 200 nm grid spacing and 10 nm, 50 nm, 100 nm, and 200 nm cutoff.
+# Query time is measured for random points on the grid, and for cylinder end points
 
-    cylinders = SimplexCellLists.Line[]
-
-    node_ptr = 0
-    for filament_i in 1:numfilaments
-        node_ptr += 1
-        for cylinder_i in 1:numcylinders[filament_i]
-            push!(cylinders,[nodepositions[node_ptr,:],nodepositions[node_ptr+1,:]])
-            node_ptr += 1
-        end
+function build!(scl::LineSegCellList{Int64,Float32}, cylinders)
+    cell_line_segs_clear!(scl)
+    for (i, cyl) in enumerate(cylinders)
+        cell_line_seg_add!(scl, cyl[1], cyl[2], i)
     end
-    return cylinders
 end
 
-
-function run1(cylinders)
-    output = 0
-    f(x,y,i,j,d2,output) = output + 1
-    painter = SimplexCellLists.Painter(0,1;
-        grid_start= SA[0.0,0.0,0.0],
-        grid_size= SA[101,101,11],
-        voxel_length= 40.0,
-        max_range= SA[Float64[],[226.0]],
-    )
-    naive = SimplexCellLists.Naive(0, 1)
-    # SimplexCellLists.setElements!(naive,[cylinders],[])
-    SimplexCellLists.setElements!(painter,[],[cylinders])
-    SimplexCellLists.mapPairElements(f, output, painter, 1, SimplexCellLists.Line, 225.0f0)
+function count_nearby(scl::LineSegCellList{Int64,Float32}, points, cutoff::Float32)
+    total = 0
+    for pos in points
+        total = map_nearby_line_segs((entry, sep, out) -> (out + 1, true), scl, pos, cutoff, total)
+    end
+    total
 end
 
-function run1(cylinders)
-    f(x,y,i,j,d2,output) = output + 1
-    painter = SimplexCellLists.Painter(0,1;
-        grid_start= SA[200.0,200.0,200.0],
-        grid_size= SA[10,10,1],
-        voxel_length= 400.0,
-        max_range= SA[Float64[],[226.0]],
-    )
-    #naive = SimplexCellLists.Naive(0, 1)
-    #SimplexCellLists.setElements!(naive,[],[cylinders])
-    SimplexCellLists.setElements!(
-        painter,
-        Vector{SimplexCellLists.Point}[],
-        Vector{SimplexCellLists.Line}[cylinders])
-    SimplexCellLists.mapPairElements(f, 0, painter, 1, SimplexCellLists.Line, 225.0f0)
-    #SimplexCellLists.mapPairElements(f, output, naive, 1, SimplexCellLists.Line, 225.0f0)
+function build!(pcl::PointCellList{Int64,Float32}, points)
+    cell_points_clear!(pcl)
+    for (i, pos) in enumerate(points)
+        cell_point_add!(pcl, pos, i)
+    end
+end
+
+function count_nearby(pcl::PointCellList{Int64,Float32}, points, cutoff::Float32)
+    total = 0
+    for pos in points
+        total = map_nearby_points((entry, sep, out) -> (out + 1, true), pcl, pos, cutoff, total)
+    end
+    total
+end
+
+const grid_dims = SA[4000.0f0, 4000.0f0, 400.0f0]
+
+cylinders = load_cylinders()
+end_points = [cyl[2] for cyl in cylinders]
+Random.seed!(1234)
+random_points = [(rand(SimplexCellLists.Vec3{Float32}) .- 0.5f0) .* grid_dims for _ in eachindex(cylinders)]
+
+for grid_spacing in Float32[100, 200]
+    grid_size = round.(Int, grid_dims ./ grid_spacing)
+    scl = LineSegCellList{Int64, Float32}(Tuple(grid_size), grid_spacing)
+    println("$(length(cylinders)) line segments, grid spacing $grid_spacing nm, grid size $(Tuple(grid_size))")
+    print("  build:")
+    display(@b build!($scl, $cylinders) evals=1)
+    build!(scl, cylinders)
+    for cutoff in Float32[10, 50, 100]
+        n = count_nearby(scl, random_points, cutoff)
+        print("  cutoff $cutoff nm, $(length(random_points)) random points ($n hits):")
+        display(@b count_nearby($scl, $random_points, $cutoff) evals=1)
+        n = count_nearby(scl, end_points, cutoff)
+        print("  cutoff $cutoff nm, $(length(end_points)) end points ($n hits):")
+        display(@b count_nearby($scl, $end_points, $cutoff) evals=1)
+    end
+    println()
+end
+
+for grid_spacing in Float32[100, 200]
+    grid_size = round.(Int, grid_dims ./ grid_spacing)
+    pcl = PointCellList{Int64, Float32}(Tuple(grid_size), grid_spacing)
+    println("$(length(end_points)) points, grid spacing $grid_spacing nm, grid size $(Tuple(grid_size))")
+    print("  build:")
+    display(@b build!($pcl, $end_points) evals=1)
+    build!(pcl, end_points)
+    for cutoff in Float32[10, 50, 100]
+        n = count_nearby(pcl, random_points, cutoff)
+        print("  cutoff $cutoff nm, $(length(random_points)) random points ($n hits):")
+        display(@b count_nearby($pcl, $random_points, $cutoff) evals=1)
+        n = count_nearby(pcl, end_points, cutoff)
+        print("  cutoff $cutoff nm, $(length(end_points)) end points ($n hits):")
+        display(@b count_nearby($pcl, $end_points, $cutoff) evals=1)
+    end
+    println()
 end

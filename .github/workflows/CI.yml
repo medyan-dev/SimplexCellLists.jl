@@ -18,39 +18,21 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.8'
-          - '1.9'
-          - 'nightly'
+          - 'pre'
+          - 'min'
         os:
           - ubuntu-latest
-          - windows-latest
-          - macos-latest
         arch:
-          - x64
+          - 'default'
     steps:
-      - uses: actions/checkout@v2
-      - uses: julia-actions/setup-julia@v1
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v1
-      - name: Develop packages
-        run: |
-          julia --project=test -e '
-            using Pkg
-            Pkg.develop([PackageSpec(path=pwd())])
-            Pkg.instantiate()'
-      - uses: julia-actions/julia-buildpkg@v1
+          show-versioninfo: true
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-runtest@v1
         with:
-          project: test
-      - name: Print package status
-        run: |
-          julia --project=test -e '
-            using InteractiveUtils
-            versioninfo()
-            using Pkg
-            Pkg.status(;mode=Pkg.PKGMODE_MANIFEST)'
-      - name: Run tests
-        run: |
-          cd test && 
-          julia --project --color=yes --depwarn=yes --warn-overwrite=yes --warn-scope=yes --check-bounds=yes --compiled-modules=no  runtests.jl 
+          coverage: false
+          check_bounds: "yes"

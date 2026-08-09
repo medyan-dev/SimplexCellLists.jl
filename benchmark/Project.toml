@@ -1,0 +1,6 @@
+[deps]
+Chairmarks = "0ca39b1e-fe0b-4e98-acfc-b1656634c4de"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SimplexCellLists = "fbe69cd6-f244-4ce4-a90b-8979d86c9ea4"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
