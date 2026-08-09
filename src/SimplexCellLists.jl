@@ -35,4 +35,17 @@ export cell_line_seg_tmax
 export map_nearby_line_segs
 export cell_line_segs_clear!
 
+# The mapping functions are not precompiled because they must be specialized
+# on the caller's callback function anyway.
+let T = Int64, F = Float32
+    precompile(PointCellList{T,F}, (SVector{3,Int}, F))
+    precompile(PointCellList{T,F}, (NTuple{3,Int}, F))
+    precompile(cell_points_clear!, (PointCellList{T,F},))
+    precompile(cell_point_add!, (PointCellList{T,F}, SVector{3,F}, T))
+    precompile(LineSegCellList{T,F}, (SVector{3,Int}, F))
+    precompile(LineSegCellList{T,F}, (NTuple{3,Int}, F))
+    precompile(cell_line_segs_clear!, (LineSegCellList{T,F},))
+    precompile(cell_line_seg_add!, (LineSegCellList{T,F}, SVector{3,F}, SVector{3,F}, T))
+end
+
 end
