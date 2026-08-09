@@ -245,7 +245,7 @@ function map_nearby_line_segs(
                     pos_m_p0 = pos - entry.p0
                     t = clamp(pos_m_p0 ⋅ entry.d_hat, zero(F), tmax)
                     # distance check
-                    diff = pos_m_p0 - t * entry.d_hat
+                    diff = t * entry.d_hat - pos_m_p0
                     d2 = diff ⋅ diff
                     d2 ≤ cutoff2 || continue
                     # ownership check: tmin ≤ t < tmax, or is_end

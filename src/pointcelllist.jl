@@ -175,7 +175,7 @@ function map_nearby_points(
                 cs = @inbounds pcl.cells[begin + li]
                 for j in 1:cs.len
                     entry = @inbounds cs.list[j]
-                    diff = pos - entry.pos
+                    diff = entry.pos - pos
                     d2 = diff ⋅ diff
                     d2 ≤ cutoff2 || continue
                     out, cont = f(entry, out)
