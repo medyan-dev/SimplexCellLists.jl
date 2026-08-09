@@ -6,11 +6,11 @@ and read by [`map_nearby_points`](@ref).
 
 # Fields
 - `pos::SVector{3,F}`: point position.
-- `point_id::T`: point ID.
+- `id::T`: point ID.
 """
 struct CellPointEntry{T,F}
     pos::SVector{3,F}
-    point_id::T
+    id::T
 end
 
 struct CellPoint{T,F}
@@ -19,21 +19,21 @@ struct CellPoint{T,F}
 end
 CellPoint{T,F}() where{T,F} = CellPoint{T,F}(Memory{CellPointEntry{T,F}}(), 0)
 
-function _cell_point_push_entry!(old::CellPoint{T,F}, entry::CellPointEntry{T,F}) where {T,F}
+function _cell_push_entry!(old::CELLTYPE, entry::ENTRYTYPE) where {CELLTYPE,ENTRYTYPE}
     old_list = old.list
     cap = length(old_list)
     len = old.len
     list = if cap ≤ len
         new_cap = max(cap<<1, 1)
         @assert new_cap > len
-        new_list = Memory{CellPointEntry{T,F}}(undef, new_cap)
+        new_list = Memory{ENTRYTYPE}(undef, new_cap)
         unsafe_copyto!(new_list, 1, old_list, 1, cap)
         new_list
     else
         old_list
     end
     list[len+1] = entry
-    CellPoint{T,F}(list, len+1)
+    CELLTYPE(list, len+1)
 end
 
 """
@@ -44,7 +44,7 @@ An origin-centered 3D voxel grid for spatial queries on points. The grid spans
 `[-size * grid_spacing/2, size * grid_spacing/2)` in each dimension.
 
 Insert points with [`cell_point_add!`](@ref) and query with
-[`map_nearby_points`](@ref). Use [`cell_point_clear!`](@ref) to reset.
+[`map_nearby_points`](@ref). Use [`cell_points_clear!`](@ref) to reset.
 
 Positions are not required to be within the grid bounds: points outside the
 grid are stored in the nearest boundary cell, and queries account for this.
@@ -73,18 +73,18 @@ end
 PointCellList{T,F}(size::NTuple{3, Int}, grid_spacing::F) where {T,F} = PointCellList{T,F}(SVector{3,Int}(size...), grid_spacing)
 
 """
-    cell_point_clear!(pcl::PointCellList)::Nothing
+    cell_points_clear!(pcl::PointCellList)::Nothing
 
 Remove all points.
 """
-function cell_point_clear!(pcl::PointCellList{T,F})::Nothing where {T,F}
+function cell_points_clear!(pcl::PointCellList{T,F})::Nothing where {T,F}
     for i in eachindex(pcl.cells)
         pcl.cells[i] = CellPoint{T,F}(pcl.cells[i].list, 0)
     end
 end
 
 """
-    cell_point_add!(pcl::PointCellList{T,F}, pos::SVector{3, F}, point_id::T)::Nothing
+    cell_point_add!(pcl::PointCellList{T,F}, pos::SVector{3, F}, id::T)::Nothing
 
 Insert a point into the cell list, adding a [`CellPointEntry`](@ref) to the cell
 containing the point. If the point is outside the grid bounds, it is added to
@@ -93,9 +93,9 @@ the nearest boundary cell.
 # Arguments
 - `pcl`: the point cell list to insert into.
 - `pos`: point position.
-- `point_id`: ID for this point.
+- `id`: ID for this point.
 """
-function cell_point_add!(pcl::PointCellList{T,F}, pos::SVector{3, F}, point_id::T)::Nothing where {T,F}
+function cell_point_add!(pcl::PointCellList{T,F}, pos::SVector{3, F}, id::T)::Nothing where {T,F}
     h2_inv = pcl.inv_half_grid_spacing
     sz = pcl.size
     @argcheck all(>(0), sz)
@@ -106,10 +106,10 @@ function cell_point_add!(pcl::PointCellList{T,F}, pos::SVector{3, F}, point_id::
     # positions don't overflow Int; the prevfloat upper bound keeps the
     # resulting index ≤ size - 1.
     pos_norm = clamp.(pos*h2_inv, -F.(sz), prevfloat.(F.(sz)))
-    i = (floor.((Int,), pos_norm) .+ sz) .>> 1
+    i = round2grid(pos_norm, sz)
     li = i ⋅ strides
-    entry = CellPointEntry{T,F}(pos, point_id)
-    pcl.cells[begin + li] = _cell_point_push_entry!(pcl.cells[begin + li], entry)
+    entry = CellPointEntry{T,F}(pos, id)
+    pcl.cells[begin + li] = _cell_push_entry!(pcl.cells[begin + li], entry)
     nothing
 end
 
@@ -147,8 +147,8 @@ function map_nearby_points(
     # also keeps far away queries and huge cutoffs from overflowing Int.
     pos_norm = clamp.(pos * h2_inv, -F.(sz), prevfloat.(F.(sz)))
     r_cells = cutoff * h2_inv
-    lo = (floor.((Int,), max.(pos_norm .- r_cells, -F.(sz))) .+ sz) .>> 1
-    hi = (floor.((Int,), min.(pos_norm .+ r_cells, prevfloat.(F.(sz)))) .+ sz) .>> 1
+    lo = round2grid(max.(pos_norm .- r_cells, -F.(sz)), sz)
+    hi = round2grid(min.(pos_norm .+ r_cells, prevfloat.(F.(sz))), sz)
     for iz in lo[3]:hi[3]
         liz = iz*strides[3]
         cell_center_z = 2*iz + 1 - sz[3]

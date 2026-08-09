@@ -51,7 +51,7 @@ function dist_sqr_r_s_t(x::Point{T}, y::Point{T}) where T
     d ⋅ d, d, SVector{0,T}(), SVector{0,T}()
 end
 
-function dist_sqr_r_s_t(x::Point{T}, y::Line{T}) where T
+function dist_sqr_r_s_t(x::Point{T}, y::LineSeg{T}) where T
     r = y[2] - y[1]
     p = x[1] - y[1]
     t = clamp01nan((p ⋅ r)/(r ⋅ r))
@@ -177,7 +177,7 @@ https://www.geometrictools.com/Documentation/DistanceLine3Line3.pdf
 // Version: 6.0.2022.01.06
 Ignores the case of degenerate line segments.
 =#
-function dist_sqr_r_s_t(x::Line{T}, y::Line{T}) where T
+function dist_sqr_r_s_t(x::LineSeg{T}, y::LineSeg{T}) where T
     P0 = x[1]
     P1 = x[2]
     Q0 = y[1]
@@ -240,7 +240,7 @@ https://www.geometrictools.com/Documentation/DistanceLine3Line3.pdf
 // Version: 6.0.2022.01.06
 Ignores the case of degenerate line segments.
 =#
-function dist_sqr(x::Line{T}, y::Line{T}) where T
+function dist_sqr(x::LineSeg{T}, y::LineSeg{T}) where T
     P0 = x[1]
     P1 = x[2]
     Q0 = y[1]
@@ -327,7 +327,7 @@ function moller_trumbore_intersect(o, d, a, b, c)
     SegTriangleIntersectResult(true, t, u, v)
 end
 
-function dist_sqr_r_s_t(x::Line{T}, y::Triangle{T}) where T
+function dist_sqr_r_s_t(x::LineSeg{T}, y::Triangle{T}) where T
     fzero = zero(T)
     o = x[1]
     d = x[2] - x[1]
@@ -374,7 +374,7 @@ function dist_sqr_r_s_t(x::Line{T}, y::Triangle{T}) where T
     end
 end
 
-function dist_sqr(x::Line{T}, y::Triangle{T})::T where T
+function dist_sqr(x::LineSeg{T}, y::Triangle{T})::T where T
     fzero = zero(T)
     o = x[1]
     d = x[2] - x[1]

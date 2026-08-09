@@ -6,9 +6,10 @@ using Test
 # Helper to collect all entries from a PointCellList as (ix,iy,iz) => Vector{CellPointEntry}
 function collect_entries(pcl::PointCellList{T,F}) where {T,F}
     result = Dict{NTuple{3,Int}, Vector{CellPointEntry{T,F}}}()
-    for iz in 0:pcl.size[3]-1, iy in 0:pcl.size[2]-1, ix in 0:pcl.size[1]-1
-        # li = SA[ix,iy,iz] ⋅ pcl.strides
-        cs = reshape(pcl.cells, pcl.size[1], pcl.size[2], pcl.size[3])[ix+1,iy+1,iz+1]
+    sz = pcl.size
+    cells3 = reshape(pcl.cells, sz[1], sz[2], sz[3])
+    for iz in 0:sz[3]-1, iy in 0:sz[2]-1, ix in 0:sz[1]-1
+        cs = cells3[ix+1,iy+1,iz+1]
         if cs.len > 0
             result[(ix,iy,iz)] = collect(view(cs.list, 1:cs.len))
         end
@@ -22,18 +23,18 @@ Brute-force O(n) version of `map_nearby_points` for testing.
 function map_nearby_points_naive(
         f,
         positions::AbstractVector{SVector{3,Float32}},
-        point_ids::AbstractVector{Int64},
+        ids::AbstractVector{Int64},
         pos::SVector{3,Float32},
         cutoff::Float32,
         out,
     )
     cutoff ≤ 0 && return out
     cutoff2 = cutoff * cutoff
-    for i in eachindex(positions, point_ids)
+    for i in eachindex(positions, ids)
         diff = pos - positions[i]
         dist2 = diff ⋅ diff
         if dist2 ≤ cutoff2
-            out, cont = f(CellPointEntry{Int64,Float32}(positions[i], point_ids[i]), out)
+            out, cont = f(CellPointEntry{Int64,Float32}(positions[i], ids[i]), out)
             cont || return out
         end
     end
@@ -66,7 +67,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         entries = collect_entries(pcl)
         @test haskey(entries, (2,2,2))
         e = entries[(2,2,2)][1]
-        @test e.point_id == 1
+        @test e.id == 1
         @test e.pos == SA[0.5f0, 0.5f0, 0.5f0]
     end
 
@@ -77,7 +78,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         entries = collect_entries(pcl)
         @test haskey(entries, (0,0,0))
         e = entries[(0,0,0)][1]
-        @test e.point_id == 2
+        @test e.id == 2
     end
 
     @testset "point in last cell" begin
@@ -108,8 +109,8 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         entries = collect_entries(pcl)
         @test haskey(entries, (0,0,0))
         @test haskey(entries, (3,3,3))
-        @test entries[(0,0,0)][1].point_id == 1
-        @test entries[(3,3,3)][1].point_id == 2
+        @test entries[(0,0,0)][1].id == 1
+        @test entries[(3,3,3)][1].id == 2
     end
 
     @testset "point on cell boundary" begin
@@ -144,7 +145,7 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         entries = collect_entries(pcl)
         es = entries[(2,2,2)]
         @test length(es) == n
-        @test issetequal(map(e->e.point_id, es), 1:n)
+        @test issetequal(map(e->e.id, es), 1:n)
         @test total_entries(pcl) == n
     end
 
@@ -159,12 +160,12 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         @test count == 2
     end
 
-    @testset "cell_point_clear!" begin
+    @testset "cell_points_clear!" begin
         pcl = PointCellList{Int64,Float32}((4,4,4), 2.0f0)
         cell_point_add!(pcl, SA[0.5f0, 0.5f0, 0.5f0], Int64(1))
         cell_point_add!(pcl, SA[-3.5f0, -3.5f0, -3.5f0], Int64(2))
         @test total_entries(pcl) == 2
-        cell_point_clear!(pcl)
+        cell_points_clear!(pcl)
         @test total_entries(pcl) == 0
     end
 
@@ -178,9 +179,9 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
         cell_point_add!(pcl, SA[-4.0f0, 0.5f0, 0.5f0], Int64(5))    # exactly on the lower bound
         @test total_entries(pcl) == 5
         entries = collect_entries(pcl)
-        @test map(e->e.point_id, entries[(3,2,2)]) == [1, 4]
-        @test map(e->e.point_id, entries[(0,2,2)]) == [2, 5]
-        @test entries[(3,0,3)][1].point_id == 3
+        @test map(e->e.id, entries[(3,2,2)]) == [1, 4]
+        @test map(e->e.id, entries[(0,2,2)]) == [2, 5]
+        @test entries[(3,0,3)][1].id == 3
     end
 
     @testset "map_nearby_points" begin
@@ -283,21 +284,22 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
                 # Grid covers [-10,10)^3, but points and queries are sampled in
                 # [-12,12)^3 so some fall outside the grid and get clamped.
                 n_pts = 500
-                positions = [SVector{3,Float32}(rand(Float32, 3) .* 24f0 .- 12f0) for _ in 1:n_pts]
+                positions = [rand(SVector{3,Float32}) .* 24f0 .- 12f0 for _ in 1:n_pts]
                 for i in 1:n_pts
                     cell_point_add!(pcl, positions[i], Int64(i))
                 end
 
                 function collect_id(entry, out)
-                    push!(out, entry.point_id)
+                    push!(out, entry.id)
                     out, true
                 end
                 for _ in 1:20
                     cutoff = Float32(rand()) * 8f0
                     cutoff2 = cutoff * cutoff
-                    q = SVector{3,Float32}(rand(Float32, 3) .* 24f0 .- 12f0)
-                    cell_ids = map_nearby_points(collect_id, pcl, q, cutoff, Set{Int64}())
-                    brute_ids = map_nearby_points_naive(collect_id, positions, Int64(1):n_pts, q, cutoff, Set{Int64}())
+                    q = rand(SVector{3,Float32}) .* 24f0 .- 12f0
+                    cell_ids = map_nearby_points(collect_id, pcl, q, cutoff, Int64[])
+                    @test allunique(cell_ids)
+                    brute_ids = map_nearby_points_naive(collect_id, positions, Int64(1):n_pts, q, cutoff, Int64[])
                     # Any id in one set but not the other must be right on the cutoff boundary.
                     for id in symdiff(cell_ids, brute_ids)
                         diff = q - positions[id]
