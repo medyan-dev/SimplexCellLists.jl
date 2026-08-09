@@ -35,4 +35,4 @@ jobs:
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: false
-          check_bounds: true
+          check_bounds: "yes"
