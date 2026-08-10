@@ -106,6 +106,17 @@ using StaticArrays
         for i in 1:nbeads
             @test get_bead_force(fe, i) === SA[0.0, 0.0, 0.0]
         end
+
+        # Quantization truncates toward zero symmetrically: adding a
+        # contribution and its exact negation cancels exactly, even for values
+        # that don't quantize exactly.
+        v = SA[0.3, -1e-9, 7.123456789]
+        add_bead_force!(fe, 1, v)
+        add_bead_force!(fe, 1, -v)
+        add_energy!(fe, 0.3)
+        add_energy!(fe, -0.3)
+        @test get_bead_force(fe, 1) === SA[0.0, 0.0, 0.0]
+        @test get_energy(fe) === 0.0
     end
 
     @testset "ForceNoEnergyFixedPoint" begin
@@ -203,7 +214,7 @@ using StaticArrays
 
         # Underlying Int64 storage matches bit-for-bit.
         @test a.forces == ref.forces
-        @test a.energy[] === ref.energy[]
+        @test a.energy === ref.energy
     end
 
     @testset "combine_force_energy! generic path on FixedPoint" begin

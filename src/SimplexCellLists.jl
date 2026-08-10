@@ -47,6 +47,7 @@ let T = Int64, F = Float32
 end
 
 include("force-energy.jl")
+export ForceEnergy
 export ForceEnergyT
 export ForceEnergyFloat64
 export ForceEnergyFloat32
@@ -65,7 +66,5 @@ export get_bead_force
 export get_energy
 export get_force
 export combine_force_energy!
-
-
 
 end

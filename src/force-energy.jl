@@ -38,11 +38,89 @@ size, e.g. to reduce per-thread partials).
 """
 abstract type ForceEnergy end
 
-function get_force(force_energy::ForceEnergy, F=Float64)
+"""
+    add_bead_force!(force_energy::ForceEnergy, i::Integer, force)::Nothing
+
+Add `force`, a 3-element vector, to the accumulated force of bead `i`.
+"""
+function add_bead_force! end
+
+"""
+    zero_bead_force!(force_energy::ForceEnergy, i::Integer)::Nothing
+
+Set the accumulated force of bead `i` to zero.
+"""
+function zero_bead_force! end
+
+"""
+    add_energy!(force_energy::ForceEnergy, energy)::Nothing
+
+Add the scalar `energy` to the accumulated total energy.
+"""
+function add_energy! end
+
+"""
+    zero_energy!(force_energy::ForceEnergy)::Nothing
+
+Set the accumulated total energy to zero, leaving forces unchanged.
+"""
+function zero_energy! end
+
+"""
+    get_nbeads(force_energy::ForceEnergy)::Int
+
+Return the number of beads.
+"""
+function get_nbeads end
+
+"""
+    zero_force_energy!(force_energy::ForceEnergy)::Nothing
+
+Set all accumulated forces and the total energy to zero.
+"""
+function zero_force_energy! end
+
+"""
+    get_force!(force_energy::ForceEnergy, force_out)::Nothing
+
+Write the accumulated per-bead forces into `force_out`, a one-based vector of
+3-element vectors of length [`get_nbeads`](@ref)`(force_energy)`.
+"""
+function get_force! end
+
+"""
+    get_bead_force(force_energy::ForceEnergy, i::Integer, F::Type=Float64)::SVector{3, F}
+
+Return the accumulated force of bead `i`, converted to element type `F`.
+"""
+function get_bead_force end
+
+"""
+    get_energy(force_energy::ForceEnergy, F::Type=Float64)::F
+
+Return the accumulated total energy, converted to type `F`.
+"""
+function get_energy end
+
+"""
+    get_force(force_energy::ForceEnergy, F::Type=Float64)::Vector{SVector{3, F}}
+
+Return a new vector of the accumulated per-bead forces.
+"""
+function get_force(force_energy::ForceEnergy, ::Type{F}=Float64) where F
     force_out = zeros(SVector{3, F}, get_nbeads(force_energy))
     get_force!(force_energy, force_out)
     force_out
 end
+
+"""
+    combine_force_energy!(fe_out::ForceEnergy, fe_in::ForceEnergy) -> fe_out
+
+Merge `fe_in` into `fe_out`, which must have the same number of beads, by
+adding its accumulated forces and energy. Useful to reduce per-thread partial
+accumulators. The generic fallback round-trips through `Float64`; matching
+fixed-point types merge bit-exactly.
+"""
 function combine_force_energy!(fe_out::ForceEnergy, fe_in::ForceEnergy)
     @argcheck get_nbeads(fe_in) == get_nbeads(fe_out)
     add_energy!(fe_out, get_energy(fe_in))
@@ -52,11 +130,29 @@ function combine_force_energy!(fe_out::ForceEnergy, fe_in::ForceEnergy)
     fe_out
 end
 
+"""
+    ForceEnergyT{T}(nbeads::Integer)
+
+A [`ForceEnergy`](@ref) accumulator storing per-bead forces and the total
+energy as numbers of type `T`, summed in place. If `T` is an inexact type like
+`Float64`, results can depend on the order contributions are added in, so
+parallel reductions are not reproducible bit-for-bit.
+"""
 mutable struct ForceEnergyT{T} <: ForceEnergy
     const forces::Memory{SVector{3,T}}
     energy::T
 end
+"""
+    ForceEnergyFloat64
+
+Alias for [`ForceEnergyT`](@ref)`{Float64}`.
+"""
 const ForceEnergyFloat64 = ForceEnergyT{Float64}
+"""
+    ForceEnergyFloat32
+
+Alias for [`ForceEnergyT`](@ref)`{Float32}`.
+"""
 const ForceEnergyFloat32 = ForceEnergyT{Float32}
 function ForceEnergyT{T}(nbeads::Integer) where T
     forces = Memory{SVector{3,T}}(undef, nbeads)
@@ -106,6 +202,23 @@ end
 @inline convert_to_fixed_point(x, fbits) = unsafe_trunc(Int64, x*(oftype(x, 2)^fbits))
 @inline convert_to_floating_point(T, x, fbits) = T(x)*(convert(T, 2)^-fbits)
 
+"""
+    ForceEnergyFixedPoint{F_FBITS, E_FBITS}(nbeads::Integer)
+
+A [`ForceEnergy`](@ref) accumulator storing per-bead forces and the total
+energy as `Int64` fixed-point numbers with `F_FBITS` and `E_FBITS` fractional
+bits respectively. Accumulation is exact once inputs are quantized, so results
+are independent of the order contributions are added in, and accumulators with
+matching parameters merge bit-exactly with [`combine_force_energy!`](@ref)
+(e.g. to reduce per-thread partials reproducibly).
+
+Added values are quantized by truncation toward zero, losing up to
+`2^-F_FBITS` (or `2^-E_FBITS`) of magnitude per contribution. Negating an
+input exactly negates its quantized value, so equal-and-opposite contributions
+cancel exactly. Inputs must be finite with magnitude less than
+`2^(63 - FBITS)`; non-finite or out-of-range values silently corrupt the
+accumulator (`unsafe_trunc`), as does overflow of the running `Int64` sums.
+"""
 mutable struct ForceEnergyFixedPoint{F_FBITS, E_FBITS} <: ForceEnergy
     const forces::Memory{Int64}
     energy::Int64
@@ -177,10 +290,14 @@ function combine_force_energy!(
 end
 
 
-# Identical fixed-point force storage to `ForceEnergyFixedPoint`, but with no
-# energy accumulator: `add_energy!` is a no-op and `get_energy` is intentionally
-# not implemented, so reading the energy errors instead of returning a made-up
-# value.
+"""
+    ForceNoEnergyFixedPoint{F_FBITS}(nbeads::Integer)
+
+Identical fixed-point force storage to [`ForceEnergyFixedPoint`](@ref), but
+with no energy accumulator: [`add_energy!`](@ref) is a no-op and
+[`get_energy`](@ref) is intentionally not implemented, so reading the energy
+errors instead of returning a made-up value.
+"""
 struct ForceNoEnergyFixedPoint{F_FBITS} <: ForceEnergy
     forces::Memory{Int64}
 end
@@ -244,6 +361,15 @@ function combine_force_energy!(
 end
 
 
+"""
+    DebugForceEnergy{T}(nbeads::Integer)
+
+A [`ForceEnergy`](@ref) accumulator for testing that records every
+[`add_energy!`](@ref) and [`add_bead_force!`](@ref) contribution individually
+as type `T` instead of summing in place. Readers sum the recorded
+contributions on demand, and [`zero_bead_force!`](@ref) removes the recorded
+contributions to that bead. All bead indices are bounds-checked.
+"""
 struct DebugForceEnergy{T} <: ForceEnergy
     nbeads::Int64
     added_energy::Vector{T}
@@ -302,10 +428,15 @@ function get_energy(force_energy::DebugForceEnergy, ::Type{F}=Float64) where F
 end
 
 
-# A fake force energy if no forces or energy need to be calculated. All writes
-# are no-ops. Nothing is accumulated, so the getters (`get_force!`,
-# `get_bead_force`, `get_energy`, ...) are intentionally not implemented and
-# reading results errors instead of returning made-up values.
+"""
+    NullForceEnergy(nbeads::Integer)
+
+A fake [`ForceEnergy`](@ref) if no forces or energy need to be calculated. All
+writes are no-ops. Nothing is accumulated, so the getters
+([`get_force!`](@ref), [`get_bead_force`](@ref), [`get_energy`](@ref), ...)
+are intentionally not implemented and reading results errors instead of
+returning made-up values.
+"""
 struct NullForceEnergy <: ForceEnergy
     nbeads::Int64
 end
