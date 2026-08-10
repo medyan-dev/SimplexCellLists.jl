@@ -1,8 +1,8 @@
 module SimplexCellLists
 
-using LinearAlgebra
-using StaticArrays
-using ArgCheck
+using LinearAlgebra: LinearAlgebra, cross, dot, ⋅
+using StaticArrays: StaticArrays, @SVector, SA, SVector
+using ArgCheck: @argcheck
 
 const Vec3 = SVector{3}
 const Simplex{N,T} = SVector{N, Vec3{T}}
