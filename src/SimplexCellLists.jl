@@ -89,4 +89,27 @@ end
 precompile(get_energy, (ForceEnergyFloat64,))
 precompile(get_energy, (ForceEnergyFixedPoint{30, 30},))
 
+include("neighbor-lists.jl")
+export can_collide
+export PointIdxPart
+export CLineIdxPart
+export LineIdxPart
+export TriangleIdxPart
+export CollidePairs
+export N_COLLIDE_PAIRS
+export empty_no_collide_pairs
+export CollideObjectTypes
+export CollisionPolicy
+export filter_object
+export filter_pair
+export mix_params
+export DefaultObjectParams
+export DefaultPairParams
+export DefaultCollisionPolicy
+export NeighborListInputs
+export NeighborLists
+export is_neighbor_list_subset
+export setup_neighbors_naive!
+export setup_neighbors_sort_sweep!
+
 end

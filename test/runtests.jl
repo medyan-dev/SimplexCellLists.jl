@@ -10,3 +10,5 @@ include("test-linesegcelllist.jl")
 
 include("test-force-energy.jl")
 
+include("test-neighbor-lists.jl")
+
