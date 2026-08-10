@@ -29,6 +29,11 @@ using StaticArrays
             @test get_bead_force(fe, i) === out[i]
         end
 
+        # Allocating get_force matches, in the requested element type.
+        @test get_force(fe) == out
+        @test get_force(fe) isa Vector{SVector{3, Float64}}
+        @test get_force(fe, Float32) isa Vector{SVector{3, Float32}}
+
         # Energy accumulates, and zero_energy! resets only the energy.
         add_energy!(fe, 1.5)
         add_energy!(fe, -0.25)
@@ -84,6 +89,13 @@ using StaticArrays
         get_force!(fe, out)
         for i in 1:nbeads
             @test get_bead_force(fe, i) ≈ out[i]
+        end
+
+        # get_force! converts to the output vector's element type.
+        out32 = zeros(SVector{3, Float32}, nbeads)
+        get_force!(fe, out32)
+        for i in 1:nbeads
+            @test out32[i] ≈ SVector{3, Float32}(get_bead_force(fe, i))
         end
 
         # Energy accumulates in fixed point, and zero_energy! resets it.
@@ -229,6 +241,30 @@ using StaticArrays
         add_bead_force!(b, 1, SA[0.125, -0.25, 2.0])
         combine_force_energy!(a, b)
         @test get_bead_force(a, 1) ≈ SA[0.375, 0.25, 1.0]
+    end
+
+    @testset "combine_force_energy! generic path on ForceEnergyT" begin
+        nbeads = 3
+        a = ForceEnergyFloat64(nbeads)
+        b = ForceEnergyFloat64(nbeads)
+        add_bead_force!(a, 1, SA[1.0, 2.0, 3.0])
+        add_energy!(a, 0.5)
+        add_bead_force!(b, 1, SA[0.5, -1.0, 0.25])
+        add_bead_force!(b, 2, SA[1.0, 0.0, 0.0])
+        add_energy!(b, 0.25)
+
+        @test combine_force_energy!(a, b) === a
+        @test get_bead_force(a, 1) === SA[1.5, 1.0, 3.25]
+        @test get_bead_force(a, 2) === SA[1.0, 0.0, 0.0]
+        @test get_bead_force(a, 3) === SA[0.0, 0.0, 0.0]
+        @test get_energy(a) === 0.75
+
+        # The input accumulator is unchanged.
+        @test get_bead_force(b, 1) === SA[0.5, -1.0, 0.25]
+        @test get_energy(b) === 0.25
+
+        # Mismatched bead counts are rejected.
+        @test_throws Exception combine_force_energy!(a, ForceEnergyFloat64(nbeads + 1))
     end
 
     @testset "DebugForceEnergy" begin

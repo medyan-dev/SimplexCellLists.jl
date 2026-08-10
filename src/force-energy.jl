@@ -376,7 +376,7 @@ struct DebugForceEnergy{T} <: ForceEnergy
     added_bead_force::Vector{Tuple{Int64, SVector{3, T}}}
 end
 function DebugForceEnergy{T}(nbeads::Integer) where T
-    DebugForceEnergy{T}(nbeads, [], [])
+    DebugForceEnergy{T}(nbeads, T[], Tuple{Int64, SVector{3, T}}[])
 end
 function zero_force_energy!(force_energy::DebugForceEnergy)
     empty!(force_energy.added_energy)

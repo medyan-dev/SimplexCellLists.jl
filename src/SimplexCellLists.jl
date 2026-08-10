@@ -67,4 +67,26 @@ export get_energy
 export get_force
 export combine_force_energy!
 
+# Other fixed point fractional bit choices must be specialized on the
+# caller's parameters.
+for (FE, T) in (
+        (ForceEnergyFloat64, Float64),
+        (ForceEnergyFixedPoint{30, 30}, Float64),
+        (ForceNoEnergyFixedPoint{30}, Float64),
+    )
+    precompile(FE, (Int,))
+    precompile(zero_force_energy!, (FE,))
+    precompile(add_bead_force!, (FE, Int, SVector{3,T}))
+    precompile(zero_bead_force!, (FE, Int))
+    precompile(add_energy!, (FE, T))
+    precompile(zero_energy!, (FE,))
+    precompile(get_force!, (FE, Vector{SVector{3,T}}))
+    precompile(get_bead_force, (FE, Int))
+    precompile(get_force, (FE,))
+    precompile(combine_force_energy!, (FE, FE))
+end
+# ForceNoEnergyFixedPoint has no get_energy method.
+precompile(get_energy, (ForceEnergyFloat64,))
+precompile(get_energy, (ForceEnergyFixedPoint{30, 30},))
+
 end
