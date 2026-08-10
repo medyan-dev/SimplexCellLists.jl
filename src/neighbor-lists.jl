@@ -299,6 +299,50 @@ struct NeighborListEdge{A, B, PairParams}
     params::PairParams
 end
 
+# Active objects during the sweep in `setup_neighbors_sort_sweep!`, stored as
+# a structure of arrays so the bounding box check can be SIMD vectorized.
+# The lower bounds are stored bitwise complemented (`~lo`), which flips the
+# comparison direction so the box overlap check is the same `<` on every lane:
+#     new.lo1 < other.hi1 && other.lo1 < new.hi1 && (same for axis 2)
+# ⟺  new.lo1 < other.hi1 && ~new.hi1 < ~other.lo1 && (same for axis 2)
+# Thanks to conservative rounding these can be strict inequalities.
+struct ActiveSoA
+    hi1::Vector{UInt16}
+    nlo1::Vector{UInt16}
+    hi2::Vector{UInt16}
+    nlo2::Vector{UInt16}
+    index::Vector{UInt32}
+end
+ActiveSoA() = ActiveSoA([], [], [], [], [])
+function push_active!(a::ActiveSoA, bounds1::NTuple{2, UInt16}, bounds2::NTuple{2, UInt16}, index::UInt32)
+    push!(a.hi1, bounds1[2])
+    push!(a.nlo1, ~bounds1[1])
+    push!(a.hi2, bounds2[2])
+    push!(a.nlo2, ~bounds2[1])
+    push!(a.index, index)
+    a
+end
+# Remove entry `k` by swapping in the last entry. Return the object index of
+# the entry that was moved into slot `k`, or zero if `k` was the last entry.
+function swap_remove_active!(a::ActiveSoA, k::Integer)::UInt32
+    local moved = UInt32(0)
+    local n = length(a.index)
+    if k != n
+        a.hi1[k] = a.hi1[n]
+        a.nlo1[k] = a.nlo1[n]
+        a.hi2[k] = a.hi2[n]
+        a.nlo2[k] = a.nlo2[n]
+        moved = a.index[n]
+        a.index[k] = moved
+    end
+    pop!(a.hi1)
+    pop!(a.nlo1)
+    pop!(a.hi2)
+    pop!(a.nlo2)
+    pop!(a.index)
+    moved
+end
+
 mutable struct NeighborLists{Policy <: CollisionPolicy, PairParams}
     policy::Policy
     PPNL::Vector{NeighborListEdge{PointIdxPart, PointIdxPart, PairParams}}
@@ -503,15 +547,8 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
     end
 
     # Prepare data structures
-    ActiveStruct = @NamedTuple{
-        index::UInt32,
-        bounds1_m::UInt16,
-        bounds1_p::UInt16,
-        bounds2_m::UInt16,
-        bounds2_p::UInt16,
-    }
     # List of active elements during the sweep
-    active_objs = ntuple(x->Vector{ActiveStruct}(), N_COLLIDE_OBJECT_TYPES)
+    active_objs = ntuple(x->ActiveSoA(), N_COLLIDE_OBJECT_TYPES)
     # Place to keep track of each objects position in the active_objs list
     # This is to accelerate removing.
     active_objs_idx = (
@@ -523,6 +560,8 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
         zeros(UInt32, length(tl_radius)),
         zeros(UInt32, length(tp_radius)),
     )
+    # Buffer for the bounding box check pass
+    hits = Vector{Bool}()
     # Save quantized 16 bit bounding box edges in the sweep_axis | 1 bit 0 - end, 1 - start | 15 bit object type tag | 32 bit index
     # This is what gets sorted
     sweep_base = min_p[sweep_axis]
@@ -556,16 +595,6 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
         end
     end
     sort!(endpoints)
-    
-    # Helper to check if two 2D bounding boxes overlap
-    function boxes_overlap(
-        a_b1_m::UInt16, a_b1_p::UInt16, a_b2_m::UInt16, a_b2_p::UInt16,
-        b_b1_m::UInt16, b_b1_p::UInt16, b_b2_m::UInt16, b_b2_p::UInt16
-    )::Bool
-        # Check overlap in both axes
-        # Thanks to conservative rounding this can be inequalities.
-        (a_b1_m < b_b1_p && b_b1_m < a_b1_p) && (a_b2_m < b_b2_p && b_b2_m < a_b2_p)
-    end
 
     for i_endpoints in 1:length(endpoints)
         local e = endpoints[i_endpoints]
@@ -573,10 +602,11 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
         local obj_type = ((e>>32) & 0xFF)%Int
         local same_type_active_objs = active_objs[obj_type]
         local active_idxs = active_objs_idx[obj_type]
-        local n_same_type_active_objs = length(same_type_active_objs)
+        local n_same_type_active_objs = length(same_type_active_objs.index)
         local isend = iszero(e & (1<<47))
         if !isend
-            local new_obj::ActiveStruct
+            local new_bounds1::NTuple{2, UInt16}
+            local new_bounds2::NTuple{2, UInt16}
             # - Load the positions, radius, and collision params
             # - Get the 16 bit bounds in other_axis1 and other_axis2
             # Then go through each active elements
@@ -588,10 +618,25 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
             # and store its index in active objs so it can be quickly removed
             function _collide_active_list(index, a, a_pos, r_a, params_a, a_type,
                     bounds1, bounds2, objs, radii, params, other_type,
-                    excl, active_list, NL, should_swap)
-                for other in active_list
-                    boxes_overlap(bounds1..., bounds2..., other.bounds1_m, other.bounds1_p, other.bounds2_m, other.bounds2_p) || continue
-                    local j = other.index
+                    excl, act, NL, should_swap)
+                local n_act = length(act.hi1)
+                local q_lo1 = bounds1[1]
+                local q_nhi1 = ~bounds1[2]
+                local q_lo2 = bounds2[1]
+                local q_nhi2 = ~bounds2[2]
+                local hi1 = act.hi1
+                local nlo1 = act.nlo1
+                local hi2 = act.hi2
+                local nlo2 = act.nlo2
+                resize!(hits, n_act)
+                # Branchless bounding box check pass, SIMD vectorizable
+                @inbounds @simd for k in 1:n_act
+                    hits[k] = (q_lo1 < hi1[k]) & (q_nhi1 < nlo1[k]) &
+                              (q_lo2 < hi2[k]) & (q_nhi2 < nlo2[k])
+                end
+                for k in 1:n_act
+                    hits[k] || continue
+                    local j = act.index[k]
                     if should_swap(index, j)
                         local _a = objs[j]
                         local _b = a
@@ -656,7 +701,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         triangles, t_radius, t_params, CollideTriangle, no_collide_pairs[Int(CollidePoint_Triangle)],
                         active_objs[Int(CollideTriangle)], s.PTNL, Returns(false),
                     )
-                    new_obj = (;index, bounds1_m=bounds1[1], bounds1_p=bounds1[2], bounds2_m=bounds2[1], bounds2_p=bounds2[2])
+                    new_bounds1, new_bounds2 = bounds1, bounds2
                 end
             elseif obj_type == Int(CollideCLine)
                 let # CLines interact with: CLines, Lines, TriangleLines
@@ -686,7 +731,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         points, p_radius, p_params, CollidePoint, no_collide_pairs[Int(CollidePoint_CLine)],
                         active_objs[Int(CollidePoint)], s.PCNL, Returns(true),
                     )
-                    new_obj = (;index, bounds1_m=bounds1[1], bounds1_p=bounds1[2], bounds2_m=bounds2[1], bounds2_p=bounds2[2])
+                    new_bounds1, new_bounds2 = bounds1, bounds2
                 end
             elseif obj_type == Int(CollideLine)
                 let # Lines interact with: Lines, TriangleLines
@@ -716,7 +761,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         clines, c_radius, c_params, CollideCLine, no_collide_pairs[Int(CollideCLine_Line)],
                         active_objs[Int(CollideCLine)], s.CLNL, Returns(true),
                     )
-                    new_obj = (;index, bounds1_m=bounds1[1], bounds1_p=bounds1[2], bounds2_m=bounds2[1], bounds2_p=bounds2[2])
+                    new_bounds1, new_bounds2 = bounds1, bounds2
                 end
             elseif obj_type == Int(CollideLinePoint)
                 let # LinePoints interact with: Triangles
@@ -731,7 +776,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         triangles, t_radius, t_params, CollideTriangle, no_collide_pairs[Int(CollideLinePoint_Triangle)],
                         active_objs[Int(CollideTriangle)], s.PTNL, Returns(false),
                     )
-                    new_obj = (;index, bounds1_m=bounds1[1], bounds1_p=bounds1[2], bounds2_m=bounds2[1], bounds2_p=bounds2[2])
+                    new_bounds1, new_bounds2 = bounds1, bounds2
                 end
             elseif obj_type == Int(CollideTriangle)
                 let # Triangles don't initiate interactions (points/linepoints interact with them)
@@ -757,7 +802,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         triangle_points, tp_radius, tp_params, CollideTrianglePoint, no_collide_pairs[Int(CollideTrianglePoint_Triangle)],
                         active_objs[Int(CollideTrianglePoint)], s.PTNL, Returns(true),
                     )
-                    new_obj = (;index, bounds1_m=bounds1[1], bounds1_p=bounds1[2], bounds2_m=bounds2[1], bounds2_p=bounds2[2])
+                    new_bounds1, new_bounds2 = bounds1, bounds2
                 end
             elseif obj_type == Int(CollideTriangleLine)
                 let # TriangleLines interact with: TriangleLines (self)
@@ -782,7 +827,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         lines, l_radius, l_params, CollideLine, no_collide_pairs[Int(CollideLine_TriangleLine)],
                         active_objs[Int(CollideLine)], s.LLNL, Returns(true),
                     )
-                    new_obj = (;index, bounds1_m=bounds1[1], bounds1_p=bounds1[2], bounds2_m=bounds2[1], bounds2_p=bounds2[2])
+                    new_bounds1, new_bounds2 = bounds1, bounds2
                 end
             elseif obj_type == Int(CollideTrianglePoint)
                 let # TrianglePoints interact with: Triangles
@@ -797,24 +842,19 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         triangles, t_radius, t_params, CollideTriangle, no_collide_pairs[Int(CollideTrianglePoint_Triangle)],
                         active_objs[Int(CollideTriangle)], s.PTNL, Returns(false),
                     )
-                    new_obj = (;index, bounds1_m=bounds1[1], bounds1_p=bounds1[2], bounds2_m=bounds2[1], bounds2_p=bounds2[2])
+                    new_bounds1, new_bounds2 = bounds1, bounds2
                 end
             else
                 error("unreachable")
             end
-            @assert new_obj.index == index
-            push!(same_type_active_objs, new_obj)
+            push_active!(same_type_active_objs, new_bounds1, new_bounds2, index)
             active_idxs[index] = n_same_type_active_objs + 1
         else
             # Remove object from active list doing a swap
             local active_idx = active_idxs[index]
             @assert !iszero(active_idx)
-            if n_same_type_active_objs != active_idx
-                local last_same_type_active_obj = last(same_type_active_objs)
-                same_type_active_objs[active_idx] = last_same_type_active_obj
-                active_idxs[last_same_type_active_obj.index] = active_idx
-            end
-            pop!(same_type_active_objs)
+            local moved = swap_remove_active!(same_type_active_objs, active_idx)
+            iszero(moved) || (active_idxs[moved] = active_idx)
             active_idxs[index] = 0
         end
     end
