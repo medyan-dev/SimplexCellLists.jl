@@ -295,7 +295,7 @@ using Random
         # NaN geometry errors instead of building a bogus list
         pos_nan = copy(pos)
         pos_nan[1] = SVector{3, Float32}(NaN32, 2, 3)
-        @test_throws InexactError setup_neighbors_sort_sweep!(nl_sweep, pos_nan, inputs)
+        @test_throws ErrorException setup_neighbors_sort_sweep!(nl_sweep, pos_nan, inputs)
     end
 
     @testset "Planar and collinear geometry" begin
