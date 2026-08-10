@@ -46,4 +46,26 @@ let T = Int64, F = Float32
     precompile(cell_line_seg_add!, (LineSegCellList{T,F}, SVector{3,F}, SVector{3,F}, T))
 end
 
+include("force-energy.jl")
+export ForceEnergyT
+export ForceEnergyFloat64
+export ForceEnergyFloat32
+export ForceEnergyFixedPoint
+export ForceNoEnergyFixedPoint
+export DebugForceEnergy
+export NullForceEnergy
+export add_bead_force!
+export zero_bead_force!
+export add_energy!
+export zero_energy!
+export get_nbeads
+export zero_force_energy!
+export get_force!
+export get_bead_force
+export get_energy
+export get_force
+export combine_force_energy!
+
+
+
 end

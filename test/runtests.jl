@@ -8,3 +8,5 @@ include("test-pointcelllist.jl")
 
 include("test-linesegcelllist.jl")
 
+include("test-force-energy.jl")
+

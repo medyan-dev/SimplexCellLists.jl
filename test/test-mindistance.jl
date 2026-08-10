@@ -75,3 +75,4 @@ end
     # This issue was resolved in https://github.com/oxfordcontrol/Clarabel.jl/pull/114
     @test ref_d2min ≈ d2min atol = 1E-11 rtol = 1E-11
 end
+nothing
