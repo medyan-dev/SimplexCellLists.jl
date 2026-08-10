@@ -112,4 +112,19 @@ export is_neighbor_list_subset
 export setup_neighbors_naive!
 export setup_neighbors_sort_sweep!
 
+# Precompile the neighbor list builds for the default policy
+precompile(NeighborLists, (DefaultCollisionPolicy,))
+let NL = NeighborLists{DefaultCollisionPolicy, DefaultPairParams},
+        Inputs = NeighborListInputs{DefaultCollisionPolicy, DefaultObjectParams}
+    for T in (Float32, Float64)
+        for Pos in (
+                Vector{SVector{3, T}},
+                typeof(reinterpret(SVector{3, T}, T[])),
+            )
+            precompile(setup_neighbors_sort_sweep!, (NL, Pos, Inputs))
+            precompile(setup_neighbors_naive!, (NL, Pos, Inputs))
+        end
+    end
+end
+
 end
