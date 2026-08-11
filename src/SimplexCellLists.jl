@@ -89,4 +89,42 @@ end
 precompile(get_energy, (ForceEnergyFloat64,))
 precompile(get_energy, (ForceEnergyFixedPoint{30, 30},))
 
+include("neighbor-lists.jl")
+export can_collide
+export PointIdxPart
+export CLineIdxPart
+export LineIdxPart
+export TriangleIdxPart
+export CollidePairs
+export N_COLLIDE_PAIRS
+export empty_no_collide_pairs
+export CollideObjectTypes
+export CollisionPolicy
+export filter_object
+export filter_pair
+export mix_params
+export DefaultObjectParams
+export DefaultPairParams
+export DefaultCollisionPolicy
+export NeighborListInputs
+export NeighborLists
+export is_neighbor_list_subset
+export setup_neighbors_naive!
+export setup_neighbors_sort_sweep!
+
+# Precompile the neighbor list builds for the default policy
+precompile(NeighborLists, (DefaultCollisionPolicy,))
+let NL = NeighborLists{DefaultCollisionPolicy, DefaultPairParams},
+        Inputs = NeighborListInputs{DefaultCollisionPolicy, DefaultObjectParams}
+    for T in (Float32, Float64)
+        for Pos in (
+                Vector{SVector{3, T}},
+                typeof(reinterpret(SVector{3, T}, T[])),
+            )
+            precompile(setup_neighbors_sort_sweep!, (NL, Pos, Inputs))
+            precompile(setup_neighbors_naive!, (NL, Pos, Inputs))
+        end
+    end
+end
+
 end
