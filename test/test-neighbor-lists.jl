@@ -4,7 +4,7 @@ using StaticArrays
 using Random
 
 @testset "neighborlists" begin
-    policy = DefaultCollisionPolicy()
+    policy = DefaultCollidePolicy()
     @testset "Naive vs Sort-Sweep consistency" begin
 
         for trial in 1:2000

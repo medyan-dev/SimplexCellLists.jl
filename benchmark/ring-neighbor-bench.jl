@@ -40,7 +40,7 @@ for k in 1:length(clines)-1
     end
 end
 
-policy = DefaultCollisionPolicy()
+policy = DefaultCollidePolicy()
 inputs = NeighborListInputs(policy;
     clines,
     c_radius = fill(radius, length(clines)),

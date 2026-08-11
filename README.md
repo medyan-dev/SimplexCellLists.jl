@@ -37,13 +37,13 @@ end
 
 ## Collide forces
 
-Neighbor lists and collide forces are configured with a `CollisionPolicy`.
+Neighbor lists and collide forces are configured with a `CollidePolicy`.
 The policy decides which objects and pairs participate in the neighbor lists
 (`filter_object`, `filter_pair`), how per-object parameters combine into
 per-pair parameters (`mix_params`), and which force law applies to each edge
 (`nl_edge_forces!`).
 
-`DefaultCollisionPolicy` stores a stiffness and collision layer masks per
+`DefaultCollidePolicy` stores a stiffness and collision layer masks per
 object, and applies a soft repulsive potential `E = k/2 * (L - d)²` when two
 objects overlap, where `L` is the sum of the two radii and `d` is the closest
 distance between them. The pair stiffness `k` mixes the two per-object
@@ -53,7 +53,7 @@ stiffnesses like springs in series, `k = k₁*k₂/(k₁ + k₂)`, so the two
 ```julia
 using SimplexCellLists, StaticArrays
 
-policy = DefaultCollisionPolicy()
+policy = DefaultCollidePolicy()
 
 # Two overlapping spheres: radius 0.5, centers 0.5 apart
 pos = [SA[0.0, 0.0, 0.0], SA[0.5, 0.0, 0.0]]
@@ -77,7 +77,7 @@ triangles, `no_collide_pairs` exclusions, and a `skin` distance so lists can be
 reused across steps. `setup_neighbors_naive!` is a reference implementation of
 `setup_neighbors_sort_sweep!` useful for testing.
 
-A custom policy subtypes `CollisionPolicy{ObjectParams, PairParams}` with its
+A custom policy subtypes `CollidePolicy{ObjectParams, PairParams}` with its
 own parameter types and methods for `filter_object`, `filter_pair`, and
 `mix_params`, and can define its own `nl_edge_forces!` methods to change the
 force law.
