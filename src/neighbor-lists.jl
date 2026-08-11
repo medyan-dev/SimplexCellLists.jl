@@ -441,6 +441,9 @@ function setup_neighbors_naive!(s::NeighborLists, pos, inputs::NeighborListInput
         # Only one or zero points
         return
     end
+    for p in pos
+        all(isfinite, p) || error("positions must be finite")
+    end
 
     extra_cutoff = 2skin
 
@@ -603,7 +606,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
         local same_type_active_objs = active_objs[obj_type]
         local active_idxs = active_objs_idx[obj_type]
         local n_same_type_active_objs = length(same_type_active_objs.index)
-        local isend = iszero(e & (1<<47))
+        local isend = iszero(e & (UInt64(1)<<47))
         if !isend
             local new_bounds1::NTuple{2, UInt16}
             local new_bounds2::NTuple{2, UInt16}
