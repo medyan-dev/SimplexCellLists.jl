@@ -4,7 +4,12 @@
 
 This Julia package contains data structures and algorithms for doing computations on pairs of 3D points, line segments, and triangles within a cutoff distance.
 
-It provides cell lists for points ([`PointCellList`](src/pointcelllist.jl)) and line segments ([`LineSegCellList`](src/linesegcelllist.jl)) with fast nearby-neighbor mapping, squared-distance functions (`dist_sqr`) for all pairs of points, line segments, and triangles, neighbor list construction ([`neighbor-lists.jl`](src/neighbor-lists.jl)) with a sort and sweep broad phase, and soft-sphere collide forces and energy ([`collide-forces.jl`](src/collide-forces.jl)) computed from the neighbor lists.
+It provides:
+
+- Cell lists for points ([`PointCellList`](src/pointcelllist.jl)) and line segments ([`LineSegCellList`](src/linesegcelllist.jl)) with fast nearby-neighbor mapping.
+- Squared-distance functions (`dist_sqr`) for all pairs of points, line segments, and triangles.
+- Neighbor list construction ([`neighbor-lists.jl`](src/neighbor-lists.jl)) with a sort and sweep broad phase.
+- Soft-sphere collide forces and energy ([`collide-forces.jl`](src/collide-forces.jl)) computed from the neighbor lists.
 
 This package is largely inspired by [CellListMap.jl](https://github.com/m3g/CellListMap.jl).
 
