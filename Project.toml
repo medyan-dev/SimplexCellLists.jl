@@ -1,6 +1,6 @@
 name = "SimplexCellLists"
 uuid = "fbe69cd6-f244-4ce4-a90b-8979d86c9ea4"
-version = "0.2.1-dev"
+version = "0.2.1"
 authors = ["Nathan Zimmerberg"]
 
 [workspace]
