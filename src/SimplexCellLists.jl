@@ -99,10 +99,10 @@ export CollidePairs
 export N_COLLIDE_PAIRS
 export empty_no_collide_pairs
 export CollideObjectTypes
-export CollisionPolicy
-export filter_object
-export filter_pair
-export mix_params
+public CollisionPolicy
+public filter_object
+public filter_pair
+public mix_params
 export DefaultObjectParams
 export DefaultPairParams
 export DefaultCollisionPolicy
@@ -123,6 +123,24 @@ let NL = NeighborLists{DefaultCollisionPolicy, DefaultPairParams},
             )
             precompile(setup_neighbors_sort_sweep!, (NL, Pos, Inputs))
             precompile(setup_neighbors_naive!, (NL, Pos, Inputs))
+        end
+    end
+end
+
+include("collide-forces.jl")
+export collide_forces!
+public nl_edge_forces!
+
+# Precompile the collide forces for the default policy
+let NL = NeighborLists{DefaultCollisionPolicy, DefaultPairParams}
+    for FE in (ForceEnergyFloat64, ForceEnergyFixedPoint{30, 30}, ForceNoEnergyFixedPoint{30})
+        for T in (Float32, Float64)
+            for Pos in (
+                    Vector{SVector{3, T}},
+                    typeof(reinterpret(SVector{3, T}, T[])),
+                )
+                precompile(collide_forces!, (FE, Pos, NL, Type{Float64}))
+            end
         end
     end
 end

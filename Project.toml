@@ -1,7 +1,10 @@
 name = "SimplexCellLists"
 uuid = "fbe69cd6-f244-4ce4-a90b-8979d86c9ea4"
-authors = ["Nathan Zimmerberg"]
 version = "0.2.1-dev"
+authors = ["Nathan Zimmerberg"]
+
+[workspace]
+projects = ["test", "benchmark"]
 
 [deps]
 ArgCheck = "dce04be8-c92d-5529-be00-80e4d2c0e197"
@@ -13,6 +16,3 @@ ArgCheck = "2"
 LinearAlgebra = "1"
 StaticArrays = "1"
 julia = "1.12"
-
-[workspace]
-projects = ["test", "benchmark"]
