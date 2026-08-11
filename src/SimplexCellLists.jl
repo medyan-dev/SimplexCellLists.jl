@@ -3,6 +3,7 @@ module SimplexCellLists
 using LinearAlgebra: LinearAlgebra, cross, dot, ⋅
 using StaticArrays: StaticArrays, @SVector, SA, SVector
 using ArgCheck: @argcheck
+using ChunkSplitters: chunks
 
 const Vec3 = SVector{3}
 const Simplex{N,T} = SVector{N, Vec3{T}}
@@ -123,6 +124,23 @@ let NL = NeighborLists{DefaultCollisionPolicy, DefaultPairParams},
             )
             precompile(setup_neighbors_sort_sweep!, (NL, Pos, Inputs))
             precompile(setup_neighbors_naive!, (NL, Pos, Inputs))
+        end
+    end
+end
+
+include("collide-forces.jl")
+export collide_forces!
+
+# Precompile the collide forces for the default policy
+let NL = NeighborLists{DefaultCollisionPolicy, DefaultPairParams}
+    for FE in (ForceEnergyFloat64, ForceEnergyFixedPoint{30, 30}, ForceNoEnergyFixedPoint{30})
+        for T in (Float32, Float64)
+            for Pos in (
+                    Vector{SVector{3, T}},
+                    typeof(reinterpret(SVector{3, T}, T[])),
+                )
+                precompile(collide_forces!, (FE, Pos, NL, Type{Float64}))
+            end
         end
     end
 end
