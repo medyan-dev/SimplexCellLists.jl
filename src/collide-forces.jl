@@ -1,7 +1,7 @@
 """
     nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge, policy::CollisionPolicy, calc_type)::Nothing
 
-Add the collision force and energy of a single neighbor-list edge to `force_energy`.
+Add the collide force and energy of a single neighbor-list edge to `force_energy`.
 
 Methods dispatch on the index part types of `edge` and on `policy`, so a custom
 `CollisionPolicy` with its own `PairParams` can define its own force laws.
@@ -142,7 +142,7 @@ Force on P0 can be computed as -(fp1+fq0+fq1)
             local FP = (-ΔL*inv(L))*Rcl
             (u, s*FP, -(1-t)*FP, -t*FP)
         end
-        switchover_scale = calc_type(switchover_scale_unitless)*inv(L0)^2 # units of 1/nm^2,
+        switchover_scale = calc_type(switchover_scale_unitless)*inv(L0)^2 # units of 1/length^2
         switchover = tanh(Δ/sqrt(a*c)*switchover_scale)
         #P0 is set as origin for now, subtract forces later to get final fp0
         ucl, fp1cl, fq0cl, fq1cl = u_f(mins,mint)
@@ -341,6 +341,21 @@ function nl_forces!(force_energy::ForceEnergy, pos, nl, policy::CollisionPolicy,
     end
 end
 
+"""
+    collide_forces!(force_energy::ForceEnergy, pos, s::NeighborLists, calc_type; chunk=1, nthreads=1)::Nothing
+
+Add the collide forces and energy of every neighbor-list edge in `s` to
+`force_energy`, doing the calculations in the floating-point type `calc_type`.
+
+Each edge's contribution is computed by [`nl_edge_forces!`](@ref), so a custom
+`CollisionPolicy` can change the force laws.
+
+For multithreading, split the work into `nthreads` chunks: thread `t` calls
+`collide_forces!` with `chunk=t` and the same `nthreads`, accumulating into
+its own `force_energy`, and the per-thread accumulators are merged afterwards
+with [`combine_force_energy!`](@ref). Every edge is visited exactly once
+across the chunks.
+"""
 function collide_forces!(force_energy::ForceEnergy, pos, s::NeighborLists, calc_type; chunk=1, nthreads=1)
     nl_forces!(force_energy, pos, s.PPNL, s.policy, calc_type, chunk, nthreads)
     nl_forces!(force_energy, pos, s.PCNL, s.policy, calc_type, chunk, nthreads)

@@ -46,7 +46,9 @@ per-pair parameters (`mix_params`), and which force law applies to each edge
 `DefaultCollisionPolicy` stores a stiffness and collision layer masks per
 object, and applies a soft repulsive potential `E = k/2 * (L - d)²` when two
 objects overlap, where `L` is the sum of the two radii and `d` is the closest
-distance between them:
+distance between them. The pair stiffness `k` mixes the two per-object
+stiffnesses like springs in series, `k = k₁*k₂/(k₁ + k₂)`, so the two
+`10.0f0` stiffnesses in the example below mix to `k = 5`:
 
 ```julia
 using SimplexCellLists, StaticArrays

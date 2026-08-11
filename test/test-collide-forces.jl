@@ -80,7 +80,7 @@ function check_collide_props(a, b)
         local force_energy = ForceEnergyFloat64(length(positions))
         nl_edge_forces!(force_energy, new_pos, NeighborListEdge(a_i, b_i, L, DefaultPairParams(k)), policy, Float64)
         local Δe = get_energy(force_energy) - e0
-        @test (f[i]*Δx + Δe) < 1.5E-7
+        @test abs(f[i]*Δx + Δe) < 1.5E-7
     end
 
     # Translation invariance
@@ -100,11 +100,13 @@ function check_collide_props(a, b)
     force_energy = ForceEnergyFloat64(length(positions))
     nl_edge_forces!(force_energy, positions, NeighborListEdge(a_i, b_i, L, DefaultPairParams(k)), policy, Float64)
     e0 = get_energy(force_energy)
-    f = flat_force(force_energy)
-    new_pos = (rand(RotMatrix{3}),) .* positions
+    f0 = get_force(force_energy)
+    R = rand(RotMatrix{3})
+    new_pos = (R,) .* positions
     force_energy = ForceEnergyFloat64(length(positions))
     nl_edge_forces!(force_energy, new_pos, NeighborListEdge(a_i, b_i, L, DefaultPairParams(k)), policy, Float64)
     @test e0 ≈ get_energy(force_energy)
+    @test (R,) .* f0 ≈ get_force(force_energy)
     return
 end
 
@@ -172,6 +174,59 @@ end
             SA[0.1*y + randn()*x + randn()*z, 0.1*y + randn()*x + randn()*z],
             SA[randn()*x + randn()*z, randn()*x + randn()*z],
         )
+    end
+end
+
+@testset "collide_forces! integration" begin
+    policy = DefaultCollisionPolicy()
+    # 3×3×4 grid, spacing 0.4: with radius 0.3 overlaps are guaranteed, but
+    # no two objects touch exactly, so all forces stay finite
+    positions = [0.4*SA[mod(i-1, 3), mod((i-1)÷3, 3), (i-1)÷9] for i in 1:30]
+    params = DefaultObjectParams(10.0f0, UInt32(1), UInt32(0))
+    inputs = NeighborListInputs(policy;
+        points = [PointIdxPart(i) for i in 1:10],
+        p_radius = fill(0.3f0, 10),
+        p_params = fill(params, 10),
+        clines = [CLineIdxPart(i) for i in 11:2:17],
+        c_radius = fill(0.3f0, 4),
+        c_params = fill(params, 4),
+        lines = [LineIdxPart(19, 20), LineIdxPart(21, 22)],
+        l_radius = fill(0.3f0, 2),
+        l_params = fill(params, 2),
+        triangles = [TriangleIdxPart(23, 24, 25)],
+        t_radius = [0.5f0],
+        t_params = [params],
+    )
+    nl = NeighborLists(policy)
+    setup_neighbors_sort_sweep!(nl, positions, inputs)
+    # every edge type participates
+    for list in (nl.PPNL, nl.PCNL, nl.PLNL, nl.PTNL, nl.CCNL, nl.CLNL, nl.LLNL)
+        @test !isempty(list)
+    end
+
+    fe = ForceEnergyFloat64(length(positions))
+    collide_forces!(fe, positions, nl, Float64)
+    @test get_energy(fe) > 0
+    @test all(f -> all(isfinite, f), get_force(fe))
+
+    # matches summing nl_edge_forces! over every edge
+    fe_manual = ForceEnergyFloat64(length(positions))
+    for list in (nl.PPNL, nl.PCNL, nl.PLNL, nl.PTNL, nl.CCNL, nl.CLNL, nl.LLNL)
+        for edge in list
+            nl_edge_forces!(fe_manual, positions, edge, policy, Float64)
+        end
+    end
+    @test get_energy(fe_manual) == get_energy(fe)
+    @test get_force(fe_manual) == get_force(fe)
+
+    # the chunked path visits every edge exactly once
+    for nthreads in (1, 2, 3, 7, 100)
+        local fe_chunked = ForceEnergyFloat64(length(positions))
+        for chunk in 1:nthreads
+            collide_forces!(fe_chunked, positions, nl, Float64; chunk, nthreads)
+        end
+        @test get_energy(fe_chunked) ≈ get_energy(fe)
+        @test get_force(fe_chunked) ≈ get_force(fe)
     end
 end
 nothing
