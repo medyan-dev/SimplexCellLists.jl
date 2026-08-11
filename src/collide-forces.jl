@@ -1,14 +1,14 @@
 """
-    nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge, policy::CollisionPolicy, calc_type)::Nothing
+    nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge, policy::CollidePolicy, calc_type)::Nothing
 
 Add the collide force and energy of a single neighbor-list edge to `force_energy`.
 
 Methods dispatch on the index part types of `edge` and on `policy`, so a custom
-`CollisionPolicy` with its own `PairParams` can define its own force laws.
+`CollidePolicy` with its own `PairParams` can define its own force laws.
 """
 function nl_edge_forces! end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, PointIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, PointIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
     x1 = pos[edge.a.i]
     x2 = pos[edge.b.i]
     d = map(calc_type, x1 - x2)
@@ -27,7 +27,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
     x1 = pos[edge.a.i]
     y1 = pos[edge.b.i]
     y2 = pos[edge.b.i + UInt32(1)]
@@ -51,7 +51,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
     x1 = pos[edge.a.i]
     y1 = pos[edge.b.i]
     y2 = pos[edge.b.j]
@@ -196,7 +196,7 @@ Force on P0 can be computed as -(fp1+fq0+fq1)
     end
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
     P0 = pos[edge.a.i]
     P1 = pos[edge.a.i + UInt32(1)]
     Q0 = pos[edge.b.i]
@@ -216,7 +216,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
     P0 = pos[edge.a.i]
     P1 = pos[edge.a.i + UInt32(1)]
     Q0 = pos[edge.b.i]
@@ -236,7 +236,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{LineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{LineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
     P0 = pos[edge.a.i]
     P1 = pos[edge.a.j]
     Q0 = pos[edge.b.i]
@@ -265,7 +265,7 @@ Based on https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pd
 // https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
 // Version: 6.0.2022.01.06
 =#
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, TriangleIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, TriangleIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
     P = pos[edge.a.i]
     B = pos[edge.b.i]
     E0 = map(calc_type, pos[edge.b.j] - B)
@@ -334,7 +334,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-function nl_forces!(force_energy::ForceEnergy, pos, nl, policy::CollisionPolicy, calc_type::T, chunk, nthreads) where T
+function nl_forces!(force_energy::ForceEnergy, pos, nl, policy::CollidePolicy, calc_type::T, chunk, nthreads) where T
     # Split 1:length(nl) into nthreads contiguous chunks with sizes differing
     # by at most one; chunks past the end are empty.
     q, r = divrem(length(nl), nthreads)
@@ -353,7 +353,7 @@ Add the collide forces and energy of every neighbor-list edge in `s` to
 `force_energy`, doing the calculations in the floating-point type `calc_type`.
 
 Each edge's contribution is computed by [`nl_edge_forces!`](@ref), so a custom
-`CollisionPolicy` can change the force laws.
+`CollidePolicy` can change the force laws.
 
 For multithreading, split the work into `nthreads` chunks: thread `t` calls
 `collide_forces!` with `chunk=t` and the same `nthreads`, accumulating into

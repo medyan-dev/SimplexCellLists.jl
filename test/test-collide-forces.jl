@@ -11,7 +11,7 @@ Error if the collide force and energy violates a property
 `a` and `b` are vectors of three vectors
 """
 function check_collide_props(a, b)
-    policy = DefaultCollisionPolicy()
+    policy = DefaultCollidePolicy()
     positions = SVector{3, Float64}[]
     a_i, b_i = map((a,b)) do y
         local idxs = UInt32[]
@@ -178,7 +178,7 @@ end
 end
 
 @testset "collide_forces! integration" begin
-    policy = DefaultCollisionPolicy()
+    policy = DefaultCollidePolicy()
     # 3×3×4 grid, spacing 0.4: with radius 0.3 overlaps are guaranteed, but
     # no two objects touch exactly, so all forces stay finite
     positions = [0.4*SA[mod(i-1, 3), mod((i-1)÷3, 3), (i-1)÷9] for i in 1:30]

@@ -96,16 +96,16 @@ Dispatch token and global configuration for neighbor-list construction.
 
 `ObjectParams` is per-object. `PairParams` is per-pair.
 """
-abstract type CollisionPolicy{ObjectParams, PairParams} end
+abstract type CollidePolicy{ObjectParams, PairParams} end
 
-object_params_type(::Type{<:CollisionPolicy{O, P}}) where {O, P} = O
-pair_params_type(::Type{<:CollisionPolicy{O, P}}) where {O, P} = P
-object_params_type(policy::CollisionPolicy) = object_params_type(typeof(policy))
-pair_params_type(policy::CollisionPolicy) = pair_params_type(typeof(policy))
+object_params_type(::Type{<:CollidePolicy{O, P}}) where {O, P} = O
+pair_params_type(::Type{<:CollidePolicy{O, P}}) where {O, P} = P
+object_params_type(policy::CollidePolicy) = object_params_type(typeof(policy))
+pair_params_type(policy::CollidePolicy) = pair_params_type(typeof(policy))
 
 """
     filter_object(
-        policy::CollisionPolicy{ObjectParams, PairParams},
+        policy::CollidePolicy{ObjectParams, PairParams},
         object_params::ObjectParams,
         object_type::CollideObjectTypes,
         object_index::UInt32,
@@ -121,7 +121,7 @@ function filter_object end
 
 """
     filter_pair(
-        policy::CollisionPolicy{ObjectParams, PairParams},
+        policy::CollidePolicy{ObjectParams, PairParams},
         a::ObjectParams,
         b::ObjectParams,
         object_type_a::CollideObjectTypes,
@@ -144,7 +144,7 @@ function filter_pair end
 
 """
     mix_params(
-        policy::CollisionPolicy{ObjectParams, PairParams},
+        policy::CollidePolicy{ObjectParams, PairParams},
         a::ObjectParams,
         b::ObjectParams,
         object_type_a::CollideObjectTypes,
@@ -169,7 +169,7 @@ struct DefaultPairParams
     k::Float32
 end
 
-Base.@kwdef struct DefaultCollisionPolicy <: CollisionPolicy{
+Base.@kwdef struct DefaultCollidePolicy <: CollidePolicy{
         DefaultObjectParams,
         DefaultPairParams,
     }
@@ -178,7 +178,7 @@ Base.@kwdef struct DefaultCollisionPolicy <: CollisionPolicy{
 end
 
 @inline function filter_object(
-        ::DefaultCollisionPolicy,
+        ::DefaultCollidePolicy,
         params::DefaultObjectParams,
         object_type::CollideObjectTypes,
         object_index::UInt32,
@@ -192,13 +192,13 @@ end
 
 Check if two objects can collide based on their collision layers and no-collide masks.
 
-Each object has `collision_layers` (which layers it is on) and `no_collide_mask`
+Each object has `layers` (which layers it is on) and `no_collide_mask`
 (which layers it will not collide with). Two objects cannot collide if either one
 has disabled collisions with the other's layer:
 
     no_collide = (A.layers & B.no_collide_mask) ≠ 0  OR  (B.layers & A.no_collide_mask) ≠ 0
 
-Default `collision_layers = UInt32(1)` and `no_collide_mask = UInt32(0)` (collide with all layers),
+Default `layers = UInt32(1)` and `no_collide_mask = UInt32(0)` (collide with all layers),
 so all objects collide by default.
 """
 @inline function can_collide(layers_a::UInt32, no_collide_mask_a::UInt32, layers_b::UInt32, no_collide_mask_b::UInt32)::Bool
@@ -206,7 +206,7 @@ so all objects collide by default.
 end
 
 @inline function filter_pair(
-        ::DefaultCollisionPolicy,
+        ::DefaultCollidePolicy,
         a::DefaultObjectParams,
         b::DefaultObjectParams,
         object_type_a::CollideObjectTypes,
@@ -220,7 +220,7 @@ end
 end
 
 @inline function mix_params(
-        ::DefaultCollisionPolicy,
+        ::DefaultCollidePolicy,
         a::DefaultObjectParams,
         b::DefaultObjectParams,
         object_type_a::CollideObjectTypes,
@@ -250,7 +250,7 @@ in the reverse order are silently ignored:
   `CollideLine_Line` excludes `line_index_a => line_index_b` where
   `line_index_a < line_index_b`.
 """
-Base.@kwdef mutable struct NeighborListInputs{Policy <: CollisionPolicy, ObjectParams}
+Base.@kwdef mutable struct NeighborListInputs{Policy <: CollidePolicy, ObjectParams}
     policy::Policy
 
     points::Vector{PointIdxPart} = PointIdxPart[]
@@ -287,7 +287,7 @@ Base.@kwdef mutable struct NeighborListInputs{Policy <: CollisionPolicy, ObjectP
     nthreads::Int = 1
 end
 
-function NeighborListInputs(policy::Policy; kwargs...) where {Policy <: CollisionPolicy}
+function NeighborListInputs(policy::Policy; kwargs...) where {Policy <: CollidePolicy}
     ObjectParams = object_params_type(policy)
     NeighborListInputs{Policy, ObjectParams}(; policy, kwargs...)
 end
@@ -343,7 +343,7 @@ function swap_remove_active!(a::ActiveSoA, k::Integer)::UInt32
     moved
 end
 
-mutable struct NeighborLists{Policy <: CollisionPolicy, PairParams}
+mutable struct NeighborLists{Policy <: CollidePolicy, PairParams}
     policy::Policy
     PPNL::Vector{NeighborListEdge{PointIdxPart, PointIdxPart, PairParams}}
     PCNL::Vector{NeighborListEdge{PointIdxPart, CLineIdxPart, PairParams}}
@@ -353,7 +353,7 @@ mutable struct NeighborLists{Policy <: CollisionPolicy, PairParams}
     CLNL::Vector{NeighborListEdge{CLineIdxPart, LineIdxPart, PairParams}}
     LLNL::Vector{NeighborListEdge{LineIdxPart, LineIdxPart, PairParams}}
 end
-function NeighborLists(policy::Policy) where {Policy <: CollisionPolicy}
+function NeighborLists(policy::Policy) where {Policy <: CollidePolicy}
     PairParams = pair_params_type(policy)
     NeighborLists{Policy, PairParams}(
         policy,
