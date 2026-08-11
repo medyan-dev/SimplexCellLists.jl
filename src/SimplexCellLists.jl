@@ -3,7 +3,6 @@ module SimplexCellLists
 using LinearAlgebra: LinearAlgebra, cross, dot, ⋅
 using StaticArrays: StaticArrays, @SVector, SA, SVector
 using ArgCheck: @argcheck
-using ChunkSplitters: chunks
 
 const Vec3 = SVector{3}
 const Simplex{N,T} = SVector{N, Vec3{T}}
@@ -100,10 +99,10 @@ export CollidePairs
 export N_COLLIDE_PAIRS
 export empty_no_collide_pairs
 export CollideObjectTypes
-export CollisionPolicy
-export filter_object
-export filter_pair
-export mix_params
+public CollisionPolicy
+public filter_object
+public filter_pair
+public mix_params
 export DefaultObjectParams
 export DefaultPairParams
 export DefaultCollisionPolicy
@@ -130,6 +129,7 @@ end
 
 include("collide-forces.jl")
 export collide_forces!
+public nl_edge_forces!
 
 # Precompile the collide forces for the default policy
 let NL = NeighborLists{DefaultCollisionPolicy, DefaultPairParams}

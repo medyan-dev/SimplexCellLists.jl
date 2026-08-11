@@ -8,7 +8,7 @@ Methods dispatch on the index part types of `edge` and on `policy`, so a custom
 """
 function nl_edge_forces! end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, PointIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type)
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, PointIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
     x1 = pos[edge.a.i]
     x2 = pos[edge.b.i]
     d = map(calc_type, x1 - x2)
@@ -27,7 +27,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type)
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
     x1 = pos[edge.a.i]
     y1 = pos[edge.b.i]
     y2 = pos[edge.b.i + UInt32(1)]
@@ -51,7 +51,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type)
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
     x1 = pos[edge.a.i]
     y1 = pos[edge.b.i]
     y2 = pos[edge.b.j]
@@ -85,7 +85,7 @@ Returns (do_force::Bool, u, fp1, fq0, fq1) where:
 - fq1: force on Q1 (without k factor)
 Force on P0 can be computed as -(fp1+fq0+fq1)
 """
-@inline function line_line_force_core(P0, P1, Q0, Q1, calc_type, switchover_scale_unitless, L0)
+@inline function line_line_force_core(P0, P1, Q0, Q1, calc_type::T, switchover_scale_unitless, L0) where T
     P = map(calc_type, P1-P0)
     Q = map(calc_type, Q1-Q0)
     P0mQ0 = map(calc_type, P0-Q0)
@@ -196,7 +196,7 @@ Force on P0 can be computed as -(fp1+fq0+fq1)
     end
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type)
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
     P0 = pos[edge.a.i]
     P1 = pos[edge.a.i + UInt32(1)]
     Q0 = pos[edge.b.i]
@@ -216,7 +216,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type)
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
     P0 = pos[edge.a.i]
     P1 = pos[edge.a.i + UInt32(1)]
     Q0 = pos[edge.b.i]
@@ -236,7 +236,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     nothing
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{LineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type)
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{LineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
     P0 = pos[edge.a.i]
     P1 = pos[edge.a.j]
     Q0 = pos[edge.b.i]
@@ -265,7 +265,7 @@ Based on https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pd
 // https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
 // Version: 6.0.2022.01.06
 =#
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, TriangleIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type)
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, TriangleIdxPart, DefaultPairParams}, policy::DefaultCollisionPolicy, calc_type::T) where T
     P = pos[edge.a.i]
     B = pos[edge.b.i]
     E0 = map(calc_type, pos[edge.b.j] - B)
@@ -335,10 +335,15 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
 end
 
 function nl_forces!(force_energy::ForceEnergy, pos, nl, policy::CollisionPolicy, calc_type::T, chunk, nthreads) where T
-    chunk > length(nl) && return
-    for edge in chunks(nl; n=nthreads)[chunk]
-        nl_edge_forces!(force_energy, pos, edge, policy, calc_type)
+    # Split 1:length(nl) into nthreads contiguous chunks with sizes differing
+    # by at most one; chunks past the end are empty.
+    q, r = divrem(length(nl), nthreads)
+    start = (chunk - 1)*q + min(chunk - 1, r) + 1
+    stop = chunk*q + min(chunk, r)
+    for i in start:stop
+        nl_edge_forces!(force_energy, pos, nl[i], policy, calc_type)
     end
+    nothing
 end
 
 """
@@ -356,7 +361,7 @@ its own `force_energy`, and the per-thread accumulators are merged afterwards
 with [`combine_force_energy!`](@ref). Every edge is visited exactly once
 across the chunks.
 """
-function collide_forces!(force_energy::ForceEnergy, pos, s::NeighborLists, calc_type; chunk=1, nthreads=1)
+function collide_forces!(force_energy::ForceEnergy, pos, s::NeighborLists, calc_type::T; chunk=1, nthreads=1) where T
     nl_forces!(force_energy, pos, s.PPNL, s.policy, calc_type, chunk, nthreads)
     nl_forces!(force_energy, pos, s.PCNL, s.policy, calc_type, chunk, nthreads)
     nl_forces!(force_energy, pos, s.PLNL, s.policy, calc_type, chunk, nthreads)

@@ -228,5 +228,14 @@ end
         @test get_energy(fe_chunked) ≈ get_energy(fe)
         @test get_force(fe_chunked) ≈ get_force(fe)
     end
+
+    # empty neighbor lists are fine for any chunk
+    empty_nl = NeighborLists(policy)
+    fe_empty = ForceEnergyFloat64(length(positions))
+    for chunk in 1:3
+        collide_forces!(fe_empty, positions, empty_nl, Float64; chunk, nthreads=3)
+    end
+    @test iszero(get_energy(fe_empty))
+    @test all(iszero, get_force(fe_empty))
 end
 nothing
