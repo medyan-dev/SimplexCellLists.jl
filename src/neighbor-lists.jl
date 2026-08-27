@@ -1,7 +1,21 @@
 struct PointIdxPart
     i::UInt32
 end
-Base.@propagate_inbounds function _load_positions(pos, x::PointIdxPart)
+"""
+    load_positions(pos, x)
+
+Return the vertex positions of the simplex index part `x` as a static vector,
+looking each vertex up in the position collection `pos`.
+
+`x` is one of the index part types ([`PointIdxPart`](@ref), [`CLineIdxPart`](@ref),
+[`LineIdxPart`](@ref), [`TriangleIdxPart`](@ref)); the number of returned positions
+matches the number of vertices of that simplex (1 for a point, 2 for a line, 3 for a
+triangle).
+
+This is marked `Base.@propagate_inbounds`, so wrap calls in `@inbounds` to skip bounds
+checks on `pos`.
+"""
+Base.@propagate_inbounds function load_positions(pos, x::PointIdxPart)
     SA[pos[x.i]]
 end
 Base.@propagate_inbounds function _load_axis_bounds(pos, x::PointIdxPart, axis::Int)
@@ -13,7 +27,7 @@ struct CLineIdxPart
     i::UInt32
     # j = i + 1
 end
-Base.@propagate_inbounds function _load_positions(pos, x::CLineIdxPart)
+Base.@propagate_inbounds function load_positions(pos, x::CLineIdxPart)
     SA[pos[x.i], pos[x.i+UInt32(1)]]
 end
 Base.@propagate_inbounds function _load_axis_bounds(pos, x::CLineIdxPart, axis::Int)
@@ -26,7 +40,7 @@ struct LineIdxPart
     i::UInt32
     j::UInt32
 end
-Base.@propagate_inbounds function _load_positions(pos, x::LineIdxPart)
+Base.@propagate_inbounds function load_positions(pos, x::LineIdxPart)
     SA[pos[x.i], pos[x.j]]
 end
 Base.@propagate_inbounds function _load_axis_bounds(pos, x::LineIdxPart, axis::Int)
@@ -40,7 +54,7 @@ struct TriangleIdxPart
     j::UInt32
     k::UInt32
 end
-Base.@propagate_inbounds function _load_positions(pos, x::TriangleIdxPart)
+Base.@propagate_inbounds function load_positions(pos, x::TriangleIdxPart)
     SA[pos[x.i], pos[x.j], pos[x.k]]
 end
 Base.@propagate_inbounds function _load_axis_bounds(pos, x::TriangleIdxPart, axis::Int)
@@ -292,6 +306,17 @@ function NeighborListInputs(policy::Policy; kwargs...) where {Policy <: CollideP
     NeighborListInputs{Policy, ObjectParams}(; policy, kwargs...)
 end
 
+"""
+    NeighborListEdge{A, B, PairParams}
+
+A single potentially-colliding pair of simplices in a [`NeighborLists`](@ref).
+
+# Fields
+- `a::A`: index part of the first simplex, one of `PointIdxPart`, `CLineIdxPart`, or `LineIdxPart`. Triangles never initiate an interaction, so `A` is never `TriangleIdxPart`.
+- `b::B`: index part of the second simplex, one of `PointIdxPart`, `CLineIdxPart`, `LineIdxPart`, or `TriangleIdxPart`.
+- `L::Float32`: the interaction distance for the pair, i.e. the sum of the two simplices' radii.
+- `params::PairParams`: the mixed pair parameters produced by the policy's `mix_params`, passed to `nl_edge_forces!`.
+"""
 struct NeighborListEdge{A, B, PairParams}
     a::A # IdxPart
     b::B # IdxPart
@@ -343,6 +368,26 @@ function swap_remove_active!(a::ActiveSoA, k::Integer)::UInt32
     moved
 end
 
+"""
+    NeighborLists{Policy, PairParams}
+
+Holds the neighbor lists for each collidable pair of simplex types. A `CLine`
+is a line segment whose two vertices are at consecutive indices, while a `Line`
+is a line segment between two arbitrary indices.
+
+Each `*NL` field is a `Vector{NeighborListEdge{A, B, PairParams}}`, where `A` and
+`B` are the index-part types of the two simplices in the pair.
+
+# Fields
+- `policy::Policy`: the [`CollidePolicy`](@ref) controlling which pairs are collided and how pair parameters are mixed.
+- `PPNL`: point–point. Holds `CollidePoint_Point`.
+- `PCNL`: point–cline. Holds `CollidePoint_CLine`.
+- `PLNL`: point–line. Holds `CollidePoint_Line`.
+- `PTNL`: point–triangle. Holds `CollidePoint_Triangle`, `CollideLinePoint_Triangle`, and `CollideTrianglePoint_Triangle`, so the `a` of an edge may come from `points`, `line_points`, or `triangle_points`.
+- `CCNL`: cline–cline. Holds `CollideCLine_CLine`.
+- `CLNL`: cline–line. Holds `CollideCLine_Line` and `CollideCLine_TriangleLine`, so the `b` of an edge may come from `lines` or `triangle_lines`.
+- `LLNL`: line–line. Holds `CollideLine_Line`, `CollideLine_TriangleLine`, and `CollideTriangleLine_TriangleLine`, so either end of an edge may come from `lines` or `triangle_lines`.
+"""
 mutable struct NeighborLists{Policy <: CollidePolicy, PairParams}
     policy::Policy
     PPNL::Vector{NeighborListEdge{PointIdxPart, PointIdxPart, PairParams}}
@@ -464,7 +509,7 @@ function setup_neighbors_naive!(s::NeighborLists, pos, inputs::NeighborListInput
     )) do (nl, excl, a_objs, b_objs, self, a_type, b_type, a_r, a_params, b_r, b_params)
         for i in UInt32(1):UInt32(length(a_objs))
             local a = a_objs[i]
-            local a_pos = _load_positions(pos, a)
+            local a_pos = load_positions(pos, a)
             local r_i = a_r[i]
             local params_i = a_params[i]
             filter_object(policy, params_i, a_type, i, r_i) || continue
@@ -474,7 +519,7 @@ function setup_neighbors_naive!(s::NeighborLists, pos, inputs::NeighborListInput
                 local params_j = b_params[j]
                 filter_object(policy, params_j, b_type, j, r_j) || continue
                 filter_pair(policy, params_i, params_j, a_type, b_type, i, j, r_i, r_j) || continue
-                local b_pos = _load_positions(pos, b_objs[j])
+                local b_pos = load_positions(pos, b_objs[j])
                 local d2 = dist_sqr(
                     a_pos,
                     b_pos,
@@ -648,7 +693,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         local _params_a = params[j]
                         filter_pair(policy, _params_a, params_a,
                             other_type, a_type, j, index, _r_a, _r_b) || continue
-                        local _a_pos = _load_positions(pos, _a)
+                        local _a_pos = load_positions(pos, _a)
                         local _b_pos = a_pos
                         local _d2 = dist_sqr(_a_pos, _b_pos)
                         local _cutoff = _r_a + _r_b + extra_cutoff
@@ -664,7 +709,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                         local params_b = params[j]
                         filter_pair(policy, params_a, params_b,
                             a_type, other_type, index, j, r_a, r_b) || continue
-                        local b_pos = _load_positions(pos, b)
+                        local b_pos = load_positions(pos, b)
                         local d2 = dist_sqr(a_pos, b_pos)
                         local cutoff = r_a + r_b + extra_cutoff
                         d2 < cutoff^2 || continue
@@ -679,7 +724,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
             if obj_type == Int(CollidePoint)
                 let # Points interact with: Points, CLines, Lines, Triangles
                     local a = points[index]
-                    local a_pos = _load_positions(pos, a)
+                    local a_pos = load_positions(pos, a)
                     local r_a = p_radius[index]
                     local params_a = p_params[index]
                     local bounds1 = quantize_bounds(_load_axis_bounds(pos, a, other_axis1), r_a, min_p[other_axis1])
@@ -709,7 +754,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
             elseif obj_type == Int(CollideCLine)
                 let # CLines interact with: CLines, Lines, TriangleLines
                     local a = clines[index]
-                    local a_pos = _load_positions(pos, a)
+                    local a_pos = load_positions(pos, a)
                     local r_a = c_radius[index]
                     local params_a = c_params[index]
                     local bounds1 = quantize_bounds(_load_axis_bounds(pos, a, other_axis1), r_a, min_p[other_axis1])
@@ -739,7 +784,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
             elseif obj_type == Int(CollideLine)
                 let # Lines interact with: Lines, TriangleLines
                     local a = lines[index]
-                    local a_pos = _load_positions(pos, a)
+                    local a_pos = load_positions(pos, a)
                     local r_a = l_radius[index]
                     local params_a = l_params[index]
                     local bounds1 = quantize_bounds(_load_axis_bounds(pos, a, other_axis1), r_a, min_p[other_axis1])
@@ -769,7 +814,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
             elseif obj_type == Int(CollideLinePoint)
                 let # LinePoints interact with: Triangles
                     local a = line_points[index]
-                    local a_pos = _load_positions(pos, a)
+                    local a_pos = load_positions(pos, a)
                     local r_a = lp_radius[index]
                     local params_a = lp_params[index]
                     local bounds1 = quantize_bounds(_load_axis_bounds(pos, a, other_axis1), r_a, min_p[other_axis1])
@@ -785,7 +830,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
                 let # Triangles don't initiate interactions (points/linepoints interact with them)
                     # But we need to check active points/linepoints/trianglepoints against this new triangle
                     local a = triangles[index]
-                    local a_pos = _load_positions(pos, a)
+                    local a_pos = load_positions(pos, a)
                     local r_a = t_radius[index]
                     local params_a = t_params[index]
                     local bounds1 = quantize_bounds(_load_axis_bounds(pos, a, other_axis1), r_a, min_p[other_axis1])
@@ -810,7 +855,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
             elseif obj_type == Int(CollideTriangleLine)
                 let # TriangleLines interact with: TriangleLines (self)
                     local a = triangle_lines[index]
-                    local a_pos = _load_positions(pos, a)
+                    local a_pos = load_positions(pos, a)
                     local r_a = tl_radius[index]
                     local params_a = tl_params[index]
                     local bounds1 = quantize_bounds(_load_axis_bounds(pos, a, other_axis1), r_a, min_p[other_axis1])
@@ -835,7 +880,7 @@ function setup_neighbors_sort_sweep!(s::NeighborLists, pos, inputs::NeighborList
             elseif obj_type == Int(CollideTrianglePoint)
                 let # TrianglePoints interact with: Triangles
                     local a = triangle_points[index]
-                    local a_pos = _load_positions(pos, a)
+                    local a_pos = load_positions(pos, a)
                     local r_a = tp_radius[index]
                     local params_a = tp_params[index]
                     local bounds1 = quantize_bounds(_load_axis_bounds(pos, a, other_axis1), r_a, min_p[other_axis1])
