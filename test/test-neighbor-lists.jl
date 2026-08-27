@@ -348,6 +348,16 @@ using Random
         @test min_d2s64.PPNL === 1.0
         @test min_d2s64.LLNL === 4.0
         @test min_d2s64.PCNL === Inf
+        # NaN positions result in NaN, regardless of position in the list
+        for nan_idx in (1, 2, 3)
+            nan_pos = copy(pos)
+            nan_pos[nan_idx] = SVector{3, Float32}(NaN32, 0, 0)
+            @test nl_min_dist_sqr(nan_pos, s).PPNL === NaN32
+        end
+        nan_pos = copy(pos)
+        nan_pos[4] = SVector{3, Float32}(NaN32, 0, 0)
+        @test nl_min_dist_sqr(nan_pos, s).PPNL === 1.0f0
+        @test nl_min_dist_sqr(nan_pos, s).LLNL === NaN32
     end
 end
 nothing

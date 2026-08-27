@@ -424,16 +424,30 @@ function is_neighbor_list_subset(subset::NeighborLists, superset::NeighborLists)
 end
 
 
+# Branch-free check for any NaN vertex coordinate in a simplex.
+@inline function _simplex_has_nan(simplex)
+    bad = false
+    for v in simplex, x in v
+        bad |= isnan(x)
+    end
+    bad
+end
+
 # Return the minimum squared distance between the object pairs in the neighbor
-# list `nl`, or `Inf` if `nl` is empty.
+# list `nl`, `NaN` if any position used is `NaN`, or `Inf` if `nl` is empty.
 function _nl_min_dist_sqr(pos, nl::AbstractVector{<:NeighborListEdge})
     T = eltype(eltype(pos))
     min_d2 = typemax(T)
+    # dist_sqr and min_fast have undefined NaN behavior, so track NaN separately
+    # by checking the input positions.
+    bad = false
     for edge in nl
-        local d2 = dist_sqr(load_positions(pos, edge.a), load_positions(pos, edge.b))
-        min_d2 = Base.FastMath.min_fast(min_d2, d2)
+        local a = load_positions(pos, edge.a)
+        local b = load_positions(pos, edge.b)
+        bad |= _simplex_has_nan(a) | _simplex_has_nan(b)
+        min_d2 = Base.FastMath.min_fast(min_d2, dist_sqr(a, b))
     end
-    min_d2
+    ifelse(bad, T(NaN), min_d2)
 end
 
 """
@@ -441,6 +455,7 @@ end
 
 Return the minimum squared distance in each neighbor list in `s`,
 keyed by the field names of `NeighborLists`. Empty lists have a minimum of `Inf`.
+If any position used by a list is `NaN`, that list's minimum is `NaN`.
 
 Useful for checking if any objects are dangerously close, for example close
 enough to pass through each other in one time step.
