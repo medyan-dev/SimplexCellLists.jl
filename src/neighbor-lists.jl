@@ -7,13 +7,8 @@ end
 Return the vertex positions of the simplex index part `x` as a static vector,
 looking each vertex up in the position collection `pos`.
 
-`x` is one of the index part types ([`PointIdxPart`](@ref), [`CLineIdxPart`](@ref),
-[`LineIdxPart`](@ref), [`TriangleIdxPart`](@ref)); the number of returned positions
-matches the number of vertices of that simplex (1 for a point, 2 for a line, 3 for a
-triangle).
-
-This is marked `Base.@propagate_inbounds`, so wrap calls in `@inbounds` to skip bounds
-checks on `pos`.
+`x` can be a ([`PointIdxPart`](@ref), [`CLineIdxPart`](@ref),
+[`LineIdxPart`](@ref), or [`TriangleIdxPart`](@ref)).
 """
 Base.@propagate_inbounds function load_positions(pos, x::PointIdxPart)
     SA[pos[x.i]]
