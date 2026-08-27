@@ -423,6 +423,41 @@ function is_neighbor_list_subset(subset::NeighborLists, superset::NeighborLists)
     return true
 end
 
+
+# Return the minimum squared distance between the object pairs in the neighbor
+# list `nl`, or `Inf` if `nl` is empty.
+function _nl_min_dist_sqr(pos, nl::AbstractVector{<:NeighborListEdge})
+    T = eltype(eltype(pos))
+    min_d2 = typemax(T)
+    for edge in nl
+        local d2 = dist_sqr(load_positions(pos, edge.a), load_positions(pos, edge.b))
+        min_d2 = Base.FastMath.min_fast(min_d2, d2)
+    end
+    min_d2
+end
+
+"""
+    nl_min_dist_sqr(pos, s::NeighborLists)::NamedTuple
+
+Return the minimum squared distance in each neighbor list in `s`,
+keyed by the field names of `NeighborLists`. Empty lists have a minimum of `Inf`.
+
+Useful for checking if any objects are dangerously close, for example close
+enough to pass through each other in one time step.
+"""
+function nl_min_dist_sqr(pos, s::NeighborLists)
+    (;
+        PPNL = _nl_min_dist_sqr(pos, s.PPNL),
+        PCNL = _nl_min_dist_sqr(pos, s.PCNL),
+        PLNL = _nl_min_dist_sqr(pos, s.PLNL),
+        PTNL = _nl_min_dist_sqr(pos, s.PTNL),
+        CCNL = _nl_min_dist_sqr(pos, s.CCNL),
+        CLNL = _nl_min_dist_sqr(pos, s.CLNL),
+        LLNL = _nl_min_dist_sqr(pos, s.LLNL),
+    )
+end
+
+
 function _prepare_neighbor_lists!(s::NeighborLists, inputs::NeighborListInputs)
     s.policy = inputs.policy
     empty!(s.PPNL)

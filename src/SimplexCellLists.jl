@@ -131,6 +131,7 @@ export NeighborListInputs
 export NeighborLists
 export NeighborListEdge
 export is_neighbor_list_subset
+export nl_min_dist_sqr
 export setup_neighbors_naive!
 export setup_neighbors_sort_sweep!
 
@@ -145,6 +146,7 @@ let NL = NeighborLists{DefaultCollidePolicy, DefaultPairParams},
             )
             precompile(setup_neighbors_sort_sweep!, (NL, Pos, Inputs))
             precompile(setup_neighbors_naive!, (NL, Pos, Inputs))
+            precompile(nl_min_dist_sqr, (Pos, NL))
         end
     end
 end

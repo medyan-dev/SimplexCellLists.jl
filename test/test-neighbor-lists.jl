@@ -320,5 +320,34 @@ using Random
             end
         end
     end
+    @testset "nl_min_dist_sqr" begin
+        s = NeighborLists(policy)
+        pos = [
+            SVector{3, Float32}(0, 0, 0),
+            SVector{3, Float32}(1, 0, 0),
+            SVector{3, Float32}(3, 0, 0),
+            SVector{3, Float32}(0, 0, 2),
+            SVector{3, Float32}(1, 0, 2),
+        ]
+        params = DefaultPairParams(1.0f0)
+        # Empty lists have an Inf minimum
+        @test nl_min_dist_sqr(pos, s) === (;
+            PPNL=Inf32, PCNL=Inf32, PLNL=Inf32, PTNL=Inf32,
+            CCNL=Inf32, CLNL=Inf32, LLNL=Inf32,
+        )
+        push!(s.PPNL, NeighborListEdge(PointIdxPart(1), PointIdxPart(3), 1.0f0, params))
+        push!(s.PPNL, NeighborListEdge(PointIdxPart(1), PointIdxPart(2), 1.0f0, params))
+        push!(s.LLNL, NeighborListEdge(LineIdxPart(1, 2), LineIdxPart(4, 5), 1.0f0, params))
+        min_d2s = nl_min_dist_sqr(pos, s)
+        @test min_d2s.PPNL === 1.0f0
+        @test min_d2s.LLNL === 4.0f0
+        @test min_d2s.PTNL === Inf32
+        # Works with reinterpreted Float64 positions
+        pos64 = reinterpret(SVector{3, Float64}, vec(Float64.(stack(pos))))
+        min_d2s64 = nl_min_dist_sqr(pos64, s)
+        @test min_d2s64.PPNL === 1.0
+        @test min_d2s64.LLNL === 4.0
+        @test min_d2s64.PCNL === Inf
+    end
 end
 nothing
