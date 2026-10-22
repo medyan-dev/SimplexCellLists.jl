@@ -12,5 +12,7 @@ include("test-force-energy.jl")
 
 include("test-neighbor-lists.jl")
 
+include("test-neighbor-lists-grid.jl")
+
 include("test-collide-forces.jl")
 
