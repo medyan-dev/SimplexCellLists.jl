@@ -348,13 +348,12 @@ function _grid_check_finer!(nl, excl, policy, pos, extra_cutoff, level::GridLeve
                     _grid_candidate(x_query, x_in_cell, y_entry, s, c) || continue
                     local j = _grid_entry_index(y_entry)
                     local y = y_objs[j]
-                    if self
-                        local i_a, i_b = minmax(i, j)
-                        _grid_push_edge!(nl, excl, policy, extra_cutoff,
-                            x_type, i_a, y_objs[i_a], load_positions(pos, y_objs[i_a]), y_r[i_a], y_params[i_a],
-                            y_type, i_b, y_objs[i_b], load_positions(pos, y_objs[i_b]), y_r[i_b], y_params[i_b],
-                        )
-                    elseif x_is_a
+                    local keep_order = if self
+                        i < j
+                    else
+                        x_is_a
+                    end
+                    if keep_order
                         _grid_push_edge!(nl, excl, policy, extra_cutoff,
                             x_type, i, x, x_pos, r_x, params_x,
                             y_type, j, y, load_positions(pos, y), y_r[j], y_params[j],
@@ -379,8 +378,10 @@ function _grid_check_finer_levels!(levels, counts, level_of, aabbs, type_ranges,
     )
     local X = Int(x_type)
     local Y = Int(y_type)
+    # if X doesn't have any boxes at a non finest level then skip
     all(iszero, @view(counts[X, begin+1:end])) && return
     for k in type_ranges[X]
+        # TODO ideally we go through objects in the order they have been sorted into by the grid.
         local m = level_of[k]
         iszero(m) && continue
         local x_aabb = aabbs[k]
@@ -591,11 +592,9 @@ function setup_neighbors_grid!(s::NeighborLists, pos, inputs::NeighborListInputs
     _grid_quantize_type!(aabbs, policy, pos, TP, type_ranges[Int(CollideTrianglePoint)], skin_with_eps, min_p, scale, last_unit)
 
     # Assign each object to the finest level whose cells are wider than its
-    # box, see `_grid_level`. The coarsest possible level has one cell, but
-    # only build the levels that are used.
+    # box, see `_grid_level`. The coarsest possible level has one cell.
     n_levels = UInt8(1 + maximum(n -> Base.top_set_bit(n - 1), n_cells))
     level_of = UInt8[_grid_level(aabb, n_levels) for aabb in aabbs]
-    n_levels = 0x01 + maximum(level_of)
     # Number of objects of type `t` at level `k` is `counts[t, begin + k]`
     counts = zeros(Int, N_COLLIDE_OBJECT_TYPES, n_levels)
     for t in 1:N_COLLIDE_OBJECT_TYPES, k in type_ranges[t]
