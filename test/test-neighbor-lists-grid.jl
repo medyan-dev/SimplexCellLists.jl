@@ -51,7 +51,7 @@ using Random
         @test _grid_size(SA[1f-45, 0f0, 0f0], tiny, 100) == SA[1, 1, 1]
         @test _grid_size(SA[3f-45, 0f0, 0f0], tiny, 100) == SA[2, 1, 1]
 
-        # min_cell_width must be finite and positive, NaN from a NaN radius errors
+        # min_cell_width must be finite and positive
         @test_throws ArgumentError _grid_size(SA[10.0, 10.0, 10.0], 0.0, 1000)
         @test_throws ArgumentError _grid_size(SA[10.0, 10.0, 10.0], -1.0, 1000)
         @test_throws ArgumentError _grid_size(SA[10.0, 10.0, 10.0], NaN, 1000)
@@ -307,6 +307,37 @@ using Random
             pos_bad[2] = SVector{3, Float32}(1, bad, 3)
             @test_throws ErrorException setup_neighbors_grid!(nl, pos_bad, inputs)
         end
+    end
+
+    @testset "Negative or NaN radius or skin" begin
+        pos = [SVector{3, Float32}(0, 0, 0), SVector{3, Float32}(1, 1, 1)]
+        on = DefaultObjectParams(1.0f0, UInt32(1), UInt32(0))
+        off = DefaultObjectParams(0.0f0, UInt32(1), UInt32(0))
+        points = [PointIdxPart(1), PointIdxPart(2)]
+        nl = NeighborLists(policy)
+        for bad in (-1.0f0, -Inf32, NaN32)
+            # Radius of an object that passes filter_object
+            inputs = NeighborListInputs(policy; points, p_radius = [1.0f0, bad], p_params = [on, on])
+            @test_throws ArgumentError setup_neighbors_grid!(nl, pos, inputs)
+            # Even if it is the only object that passes filter_object
+            inputs = NeighborListInputs(policy; points, p_radius = [1.0f0, bad], p_params = [off, on])
+            @test_throws ArgumentError setup_neighbors_grid!(nl, pos, inputs)
+            # Skin, even with fewer than two positions
+            inputs = NeighborListInputs(policy; points, p_radius = [1.0f0, 1.0f0], p_params = [on, on], skin = bad)
+            @test_throws ArgumentError setup_neighbors_grid!(nl, pos, inputs)
+            @test_throws ArgumentError setup_neighbors_grid!(nl, pos[1:1], NeighborListInputs(policy; skin = bad))
+        end
+        # Radii of objects that fail filter_object are ignored
+        inputs = NeighborListInputs(policy;
+            points = [PointIdxPart(1), PointIdxPart(2), PointIdxPart(1)],
+            p_radius = [1.0f0, 1.0f0, -1.0f0],
+            p_params = [on, on, off],
+        )
+        setup_neighbors_grid!(nl, pos, inputs)
+        @test length(nl.PPNL) == 1
+        # Negative zero is allowed
+        inputs = NeighborListInputs(policy; points, p_radius = [-0.0f0, 1.0f0], p_params = [on, on], skin = -0.0f0)
+        test_grid_matches_naive(pos, inputs)
     end
 
     @testset "Repeated builds" begin

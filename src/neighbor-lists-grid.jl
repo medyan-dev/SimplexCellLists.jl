@@ -492,9 +492,13 @@ is stored at the finest level whose cells are wider than its padded bounding
 box, so it touches at most 8 cells there. Produces the
 same set of edges as [`setup_neighbors_naive!`](@ref) and
 [`setup_neighbors_sort_sweep!`](@ref).
+
+Throws an `ArgumentError` if `inputs.skin` is negative or NaN, or if the
+radius of any object that passes `filter_object` is negative or NaN.
 """
 function setup_neighbors_grid!(s::NeighborLists, pos, inputs::NeighborListInputs)::Nothing
     _argcheck_neighbor_list_input(inputs)
+    @argcheck inputs.skin ≥ 0 "skin must be non-negative"
     (; policy,
        points, p_radius, p_params,
        clines, c_radius, c_params,
@@ -551,6 +555,8 @@ function setup_neighbors_grid!(s::NeighborLists, pos, inputs::NeighborListInputs
         _filtered_min_radius(policy, obj_type, a_r, a_params)
     end
     min_r = minimum(first, filtered_stats)
+    # min propagates NaN, so this also rejects NaN radii
+    @argcheck min_r ≥ 0 "radii of objects that pass filter_object must be non-negative"
     n_filtered = sum(last, filtered_stats)
     if n_filtered < 2
         # Only one or zero objects, so no pairs
@@ -558,8 +564,7 @@ function setup_neighbors_grid!(s::NeighborLists, pos, inputs::NeighborListInputs
     end
 
     # Clamp the minimum cell width to the finite positive Float32 range, so
-    # zero, negative, or infinite radii are handled. clamp propagates NaN, so
-    # a NaN radius errors in _grid_size.
+    # zero or infinite `min_r + skin` is handled.
     min_cell_width = clamp(
         GRID_MIN_CELL_WIDTH_FACTOR * (min_r + skin),
         nextfloat(0.0f0),
