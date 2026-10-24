@@ -110,20 +110,140 @@ end
 end
 # TODO we could try to sneak in the results of _grid_lower_in_cell in 3 bits of idx
 
-# Push the edge from `a` to `b` if it passes `filter_pair`, the distance
-# check, and the exclusions, like `setup_neighbors_naive!`.
-@inline function _grid_push_edge!(nl, excl, policy, extra_cutoff,
-        a_type, i, a, a_pos, r_i, params_i,
-        b_type, j, b, b_pos, r_j, params_j,
+# The narrow phase runs once this many candidate pairs are buffered, so the
+# buffers stay in cache.
+const GRID_CANDIDATE_CHUNK = 1024
+# Pairs checked at once by the narrow phase distance check.
+const GRID_SIMD_WIDTH = 8
+
+# The first `n` of `i` and `j` are the candidate pairs of one pair type
+# found by the broad phase, waiting for the narrow phase. `a` indexes are in
+# `i` and `b` indexes in `j`, in the order of `NeighborListEdge`, which for
+# pairs of the same type is the smaller index first.
+# The broad phase appends candidates without branching: it writes every
+# pair it checks at `n + 1` and only advances `n` for overlapping pairs, so
+# it has to reserve room for the whole run of pairs it checks first.
+mutable struct GridCandidates
+    const i::Vector{UInt32}
+    const j::Vector{UInt32}
+    n::Int
+end
+function GridCandidates()
+    GridCandidates(
+        Vector{UInt32}(undef, 2 * GRID_CANDIDATE_CHUNK),
+        Vector{UInt32}(undef, 2 * GRID_CANDIDATE_CHUNK),
+        0,
     )
-    filter_pair(policy, params_i, params_j, a_type, b_type, i, j, r_i, r_j) || return
-    local d2 = dist_sqr(a_pos, b_pos)
-    local cutoff = r_i + r_j + extra_cutoff
-    d2 < cutoff^2 || return
-    (i => j) in excl && return
-    local pair_params = mix_params(
-        policy, params_i, params_j, a_type, b_type, i, j, r_i, r_j)
-    push!(nl, NeighborListEdge(a, b, r_i + r_j, pair_params))
+end
+
+# Make room for `extra` more candidates
+@inline function _grid_reserve!(cands::GridCandidates, extra::Int)
+    local needed = cands.n + extra
+    if needed > length(cands.i)
+        local cap = max(needed, 2 * length(cands.i))
+        resize!(cands.i, cap)
+        resize!(cands.j, cap)
+    end
+    nothing
+end
+
+# Whether the distance between simplices of these index part types can be
+# computed for several pairs at once, see `_grid_distance_pass!`.
+_grid_simd_distance(::Type, ::Type) = false
+const GridSimdIdxPart = Union{PointIdxPart, CLineIdxPart, LineIdxPart}
+_grid_simd_distance(::Type{<:GridSimdIdxPart}, ::Type{<:GridSimdIdxPart}) = true
+
+# Return `W` simplices as one simplex whose coordinates have a lane per
+# simplex.
+@inline function _grid_lanes(simplices::Tuple{Simplex{N, T}, Vararg{Simplex{N, T}, M}}) where {N, T, M}
+    local W = M + 1
+    SVector{N}(ntuple(Val(N)) do v
+        SVector{3}(ntuple(Val(3)) do axis
+            Vec{W, T}(ntuple(l -> simplices[l][v][axis], Val(W)))
+        end)
+    end)
+end
+
+# Return the simplices of the objects `objs[idx]` with a lane per object.
+# The indexes were checked when the objects were quantized.
+@inline function _grid_gather(pos, objs, idx::NTuple{W, UInt32}) where W
+    _grid_lanes(ntuple(l -> @inbounds(load_positions(pos, objs[idx[l]])), Val(W)))
+end
+
+# Return `v[k:k + W - 1]` as a tuple. Named so nothing is captured.
+@inline function _grid_load_indexes(v::Vector{UInt32}, k::Int, ::Val{W})::NTuple{W, UInt32} where W
+    ntuple(l -> @inbounds(v[k + l - 1]), Val(W))
+end
+
+# Keep the candidates within the cutoff distance, compacting them to
+# `cands[1:m]` for the returned `m`. The distance check is the one of
+# `setup_neighbors_naive!`, done `GRID_SIMD_WIDTH` pairs at a time on
+# simplices that support it, which gives identical results since the
+# distance functions do the same operations on every lane.
+function _grid_distance_pass!(cands::GridCandidates, pos, extra_cutoff, a_objs, a_r, b_objs, b_r)::Int
+    local n = cands.n
+    local m = 0
+    local k = 1
+    if _grid_simd_distance(eltype(a_objs), eltype(b_objs))
+        while k + GRID_SIMD_WIDTH - 1 ≤ n
+            local idx_a = _grid_load_indexes(cands.i, k, Val(GRID_SIMD_WIDTH))
+            local idx_b = _grid_load_indexes(cands.j, k, Val(GRID_SIMD_WIDTH))
+            local d2 = dist_sqr(_grid_gather(pos, a_objs, idx_a), _grid_gather(pos, b_objs, idx_b))
+            # Branchless compaction, the writes never pass the reads. The
+            # cutoff check is per lane with scalar loads of the radii, since
+            # LLVM turns the vector version into slow gather instructions.
+            @inbounds for l in 1:GRID_SIMD_WIDTH
+                local i = idx_a[l]
+                local j = idx_b[l]
+                local cutoff = a_r[i] + b_r[j] + extra_cutoff
+                cands.i[m + 1] = i
+                cands.j[m + 1] = j
+                m += d2[l] < cutoff^2
+            end
+            k += GRID_SIMD_WIDTH
+        end
+    end
+    @inbounds for p in k:n
+        local i = cands.i[p]
+        local j = cands.j[p]
+        local d2 = dist_sqr(load_positions(pos, a_objs[i]), load_positions(pos, b_objs[j]))
+        local cutoff = a_r[i] + b_r[j] + extra_cutoff
+        cands.i[m + 1] = i
+        cands.j[m + 1] = j
+        m += d2 < cutoff^2
+    end
+    m
+end
+
+# Push the edges of the buffered candidates that pass the distance check,
+# `filter_pair`, and the exclusions, like `setup_neighbors_naive!`, and
+# empty the buffer.
+function _grid_narrow_phase!(cands::GridCandidates, pos, policy, extra_cutoff,
+        (nl, excl, self, (a_type, a_objs, a_r, a_params), (b_type, b_objs, b_r, b_params)),
+    )
+    local m = _grid_distance_pass!(cands, pos, extra_cutoff, a_objs, a_r, b_objs, b_r)
+    # The exclusion lookup is slow and unpredictable, so instead of
+    # branching on it, every pair is written to the end of `nl` and the
+    # length only advances past pairs that aren't excluded. `mix_params` is
+    # pure, so calling it for excluded pairs is harmless.
+    local len = length(nl)
+    resize!(nl, len + m)
+    @inbounds for k in 1:m
+        local i = cands.i[k]
+        local j = cands.j[k]
+        local r_i = a_r[i]
+        local r_j = b_r[j]
+        local params_i = a_params[i]
+        local params_j = b_params[j]
+        filter_pair(policy, params_i, params_j, a_type, b_type, i, j, r_i, r_j) || continue
+        local excluded = (i => j) in excl
+        local pair_params = mix_params(
+            policy, params_i, params_j, a_type, b_type, i, j, r_i, r_j)
+        nl[len + 1] = NeighborListEdge(a_objs[i], b_objs[j], r_i + r_j, pair_params)
+        len += !excluded
+    end
+    resize!(nl, len)
+    cands.n = 0
     nothing
 end
 
@@ -260,13 +380,11 @@ function _grid_levels(aabbs, level_of, type_ranges, n_cells, n_levels::UInt8)::V
     levels
 end
 
-# Push the edges of one pair type between objects at the same level, by
-# checking the pairs of entries in each cell. For pairs of the same type,
-# each pair of entries is checked once, and the edge is from the smaller
-# index, like `i < j` in `setup_neighbors_naive!`.
-function _grid_same_level_pairs!(levels, counts, pos, policy, extra_cutoff,
-        (nl, excl, self, (a_type, a_objs, a_r, a_params), (b_type, b_objs, b_r, b_params)),
-    )
+# Buffer the candidate pairs of one pair type between objects at the same
+# level, by checking the pairs of entries in each cell. For pairs of the
+# same type, each pair of entries is checked once.
+function _grid_same_level_pairs!(levels, counts, cands, pos, policy, extra_cutoff, pair_type)
+    local (nl, excl, self, (a_type, a_objs, a_r, a_params), (b_type, b_objs, b_r, b_params)) = pair_type
     local A = Int(a_type)
     local B = Int(b_type)
     for k in 0x00:UInt8(length(levels) - 1)
@@ -280,8 +398,9 @@ function _grid_same_level_pairs!(levels, counts, pos, policy, extra_cutoff,
                 local row = n_cells[1] * (cy + plane)
                 for cx in 0:n_cells[1]-1
                     local cell = row + cx
-                    local a_range = _grid_type_range(level, A, cell)
-                    local b_range = _grid_type_range(level, B, cell)
+                    local a_range = @inbounds _grid_type_range(level, A, cell)
+                    isempty(a_range) && continue
+                    local b_range = @inbounds _grid_type_range(level, B, cell)
                     isempty(b_range) && continue
                     # Cell coordinates in the lower bound lanes
                     local c = GridEntry((0x0000, 0x0000, 0x0000, cx % UInt16, cy % UInt16, cz % UInt16, 0x0000, 0x0000))
@@ -290,25 +409,21 @@ function _grid_same_level_pairs!(levels, counts, pos, policy, extra_cutoff,
                         local a_query = _grid_query(a_entry)
                         local a_in_cell = _grid_lower_in_cell(~a_entry, s, c)
                         local i = _grid_entry_index(a_entry)
-                        local a = a_objs[i]
-                        local a_pos = load_positions(pos, a)
-                        for q in (self ? ((p + 1):last(a_range)) : b_range)
+                        local q_range = self ? ((p + 1):last(a_range)) : b_range
+                        _grid_reserve!(cands, length(q_range))
+                        local n = cands.n
+                        for q in q_range
                             local b_entry = level.values[q]
-                            _grid_candidate(a_query, a_in_cell, b_entry, s, c) || continue
+                            local hit = _grid_candidate(a_query, a_in_cell, b_entry, s, c)
                             local j = _grid_entry_index(b_entry)
-                            if self
-                                local i_a, i_b = minmax(i, j)
-                                _grid_push_edge!(nl, excl, policy, extra_cutoff,
-                                    a_type, i_a, a_objs[i_a], load_positions(pos, a_objs[i_a]), a_r[i_a], a_params[i_a],
-                                    b_type, i_b, b_objs[i_b], load_positions(pos, b_objs[i_b]), b_r[i_b], b_params[i_b],
-                                )
-                            else
-                                local b = b_objs[j]
-                                _grid_push_edge!(nl, excl, policy, extra_cutoff,
-                                    a_type, i, a, a_pos, a_r[i], a_params[i],
-                                    b_type, j, b, load_positions(pos, b), b_r[j], b_params[j],
-                                )
-                            end
+                            local (i_a, i_b) = self ? minmax(i, j) : (i, j)
+                            @inbounds cands.i[n + 1] = i_a
+                            @inbounds cands.j[n + 1] = i_b
+                            n += hit
+                        end
+                        cands.n = n
+                        if n ≥ GRID_CANDIDATE_CHUNK
+                            _grid_narrow_phase!(cands, pos, policy, extra_cutoff, pair_type)
                         end
                     end
                 end
@@ -318,14 +433,11 @@ function _grid_same_level_pairs!(levels, counts, pos, policy, extra_cutoff,
     nothing
 end
 
-# Push the edges between `x_aabb` at a coarser level and the entries of
-# type `y_type` in the cells it touches at the finer level `k`. The edge is
-# from `x` if `x_is_a`, or from the smaller index if both are the same type.
-function _grid_check_finer!(nl, excl, policy, pos, extra_cutoff, level::GridLevel, k::UInt8,
-        x_aabb, x_type, x, x_pos, r_x, params_x,
-        y_type, y_objs, y_r, y_params, x_is_a::Bool, self::Bool,
-    )
-    local Y = Int(y_type)
+# Buffer the candidate pairs between `x_aabb` at a coarser level and the
+# entries of type `Y` in the cells it touches at the finer level `k`. The
+# pair is from `x` if `x_is_a`, or from the smaller index if both are the
+# same type.
+@inline function _grid_check_finer!(cands, level::GridLevel, k::UInt8, x_aabb, Y::Int, x_is_a::Bool, self::Bool)
     local i = x_aabb.index
     local x_query = _grid_query(x_aabb)
     # The lower bound of `x` in the lower bound lanes
@@ -340,102 +452,100 @@ function _grid_check_finer!(nl, excl, policy, pos, extra_cutoff, level::GridLeve
             local row = n_cells[1] * (cy + plane)
             for cx in lo[1]:hi[1]
                 local cell = row + cx
+                # The cell is in the grid since the box is
+                local q_range = @inbounds _grid_type_range(level, Y, cell)
+                # Most cells at finer levels are empty
+                isempty(q_range) && continue
                 # Cell coordinates in the lower bound lanes
                 local c = GridEntry((0x0000, 0x0000, 0x0000, cx % UInt16, cy % UInt16, cz % UInt16, 0x0000, 0x0000))
                 local x_in_cell = _grid_lower_in_cell(x_lo, s, c)
-                for q in _grid_type_range(level, Y, cell)
+                _grid_reserve!(cands, length(q_range))
+                local n = cands.n
+                for q in q_range
                     local y_entry = level.values[q]
-                    _grid_candidate(x_query, x_in_cell, y_entry, s, c) || continue
+                    local hit = _grid_candidate(x_query, x_in_cell, y_entry, s, c)
                     local j = _grid_entry_index(y_entry)
-                    local y = y_objs[j]
-                    local keep_order = if self
-                        i < j
-                    else
-                        x_is_a
-                    end
-                    if keep_order
-                        _grid_push_edge!(nl, excl, policy, extra_cutoff,
-                            x_type, i, x, x_pos, r_x, params_x,
-                            y_type, j, y, load_positions(pos, y), y_r[j], y_params[j],
-                        )
-                    else
-                        _grid_push_edge!(nl, excl, policy, extra_cutoff,
-                            y_type, j, y, load_positions(pos, y), y_r[j], y_params[j],
-                            x_type, i, x, x_pos, r_x, params_x,
-                        )
-                    end
+                    local x_first = self ? (i < j) : x_is_a
+                    @inbounds cands.i[n + 1] = x_first ? i : j
+                    @inbounds cands.j[n + 1] = x_first ? j : i
+                    n += hit
                 end
+                cands.n = n
             end
         end
     end
     nothing
 end
 
-# Push the edges between objects of type `x_type` and the entries of type
-# `y_type` at finer levels.
-function _grid_check_finer_levels!(levels, counts, level_of, aabbs, type_ranges, pos, policy, extra_cutoff,
-        nl, excl, self, (x_type, x_objs, x_r, x_params), (y_type, y_objs, y_r, y_params), x_is_a::Bool,
+# Buffer the candidate pairs between objects of the `a` type of `pair_type`
+# if `x_is_a` or its `b` type otherwise, and the entries of the other type
+# at finer levels.
+function _grid_check_finer_levels!(levels, counts, level_of, aabbs, type_ranges, cands, pos, policy, extra_cutoff,
+        pair_type, x_is_a::Bool,
     )
-    local X = Int(x_type)
-    local Y = Int(y_type)
-    # if X doesn't have any boxes at a non finest level then skip
+    local (nl, excl, self, (a_type, a_objs, a_r, a_params), (b_type, b_objs, b_r, b_params)) = pair_type
+    local X = Int(x_is_a ? a_type : b_type)
+    local Y = Int(x_is_a ? b_type : a_type)
+    # Skip if X doesn't have any boxes at a non finest level
     all(iszero, @view(counts[X, begin+1:end])) && return
     for k in type_ranges[X]
         # TODO ideally we go through objects in the order they have been sorted into by the grid.
         local m = level_of[k]
         iszero(m) && continue
         local x_aabb = aabbs[k]
-        local i = x_aabb.index
-        local x = x_objs[i]
-        local x_pos = load_positions(pos, x)
         for l in 0x00:(m - 0x01)
             iszero(counts[Y, begin + l]) && continue
-            _grid_check_finer!(nl, excl, policy, pos, extra_cutoff, levels[begin + l], l,
-                x_aabb, x_type, x, x_pos, x_r[i], x_params[i],
-                y_type, y_objs, y_r, y_params, x_is_a, self,
-            )
+            _grid_check_finer!(cands, levels[begin + l], l, x_aabb, Y, x_is_a, self)
+        end
+        if cands.n ≥ GRID_CANDIDATE_CHUNK
+            _grid_narrow_phase!(cands, pos, policy, extra_cutoff, pair_type)
         end
     end
     nothing
 end
 
-# Push the edges of one pair type between objects at different levels,
-# found from the coarser object.
-function _grid_cross_level_pairs!(levels, counts, level_of, aabbs, type_ranges, pos, policy, extra_cutoff,
-        (nl, excl, self, a_arrays, b_arrays),
+# Buffer the candidate pairs of one pair type between objects at different
+# levels, found from the coarser object.
+function _grid_cross_level_pairs!(levels, counts, level_of, aabbs, type_ranges, cands, pos, policy, extra_cutoff, pair_type)
+    _grid_check_finer_levels!(levels, counts, level_of, aabbs, type_ranges, cands, pos, policy, extra_cutoff,
+        pair_type, true,
     )
-    _grid_check_finer_levels!(levels, counts, level_of, aabbs, type_ranges, pos, policy, extra_cutoff,
-        nl, excl, self, a_arrays, b_arrays, true,
-    )
-    if !self
-        _grid_check_finer_levels!(levels, counts, level_of, aabbs, type_ranges, pos, policy, extra_cutoff,
-            nl, excl, self, b_arrays, a_arrays, false,
+    if !pair_type[3]
+        _grid_check_finer_levels!(levels, counts, level_of, aabbs, type_ranges, cands, pos, policy, extra_cutoff,
+            pair_type, false,
         )
     end
     nothing
 end
 
 # Push the edges of one pair type, `(neighbor list, exclusions, same type,
-# a objects, b objects)`. Pairs at the same level are checked within each
-# cell, and pairs at different levels from the coarser object, so each pair
-# is checked once.
-function _grid_pairs!(levels, counts, level_of, aabbs, type_ranges, pos, policy, extra_cutoff, pair_type)
-    _grid_same_level_pairs!(levels, counts, pos, policy, extra_cutoff, pair_type)
-    _grid_cross_level_pairs!(levels, counts, level_of, aabbs, type_ranges, pos, policy, extra_cutoff, pair_type)
+# a objects, b objects)`. The broad phase buffers the pairs of objects whose
+# padded bounding boxes overlap: pairs at the same level are found within
+# each cell, and pairs at different levels from the coarser object, so each
+# pair is found once. The narrow phase pushes the edges of the buffered
+# pairs.
+function _grid_pairs!(levels, counts, level_of, aabbs, type_ranges, cands, pos, policy, extra_cutoff, pair_type)
+    _grid_same_level_pairs!(levels, counts, cands, pos, policy, extra_cutoff, pair_type)
+    _grid_cross_level_pairs!(levels, counts, level_of, aabbs, type_ranges, cands, pos, policy, extra_cutoff, pair_type)
+    _grid_narrow_phase!(cands, pos, policy, extra_cutoff, pair_type)
     nothing
 end
 
 # Return the smallest radius and the number of objects that pass `filter_object`.
 function _filtered_min_radius(policy, obj_type::CollideObjectTypes, radii, params)::Tuple{Float32, Int}
     local min_r = Inf32
+    local any_nan = false
     local n = 0
     for index in UInt32(1):UInt32(length(radii))
         local r = radii[index]
-        filter_object(policy, params[index], obj_type, index, r) || continue
-        min_r = min(min_r, r)
-        n += 1
+        local keep = filter_object(policy, params[index], obj_type, index, r)
+        # Branchless, and the fast min vectorizes. NaN is tracked separately
+        # since the fast min may drop it.
+        min_r = Base.FastMath.min_fast(min_r, ifelse(keep, r, Inf32))
+        any_nan |= keep & isnan(r)
+        n += keep
     end
-    (min_r, n)
+    (any_nan ? NaN32 : min_r, n)
 end
 
 # Return the number of cells `n` along each axis of a grid spanning `width`,
@@ -604,7 +714,8 @@ function setup_neighbors_grid!(s::NeighborLists, pos, inputs::NeighborListInputs
 
     # Each pair type, like `setup_neighbors_naive!`
     extra_cutoff = 2skin
-    args = (levels, counts, level_of, aabbs, type_ranges, pos, policy, extra_cutoff)
+    cands = GridCandidates()
+    args = (levels, counts, level_of, aabbs, type_ranges, cands, pos, policy, extra_cutoff)
     ncp = no_collide_pairs
     _grid_pairs!(args..., (s.PPNL, ncp[Int(CollidePoint_Point)], true, P, P))
     _grid_pairs!(args..., (s.PCNL, ncp[Int(CollidePoint_CLine)], false, P, C))
