@@ -64,7 +64,7 @@ end
 #     (hi..., ~lo..., low half of index, high half of index)
 # so checking a box against it is a few operations on all lanes at once,
 # see `_grid_candidate`.
-const GridEntry = Vec{8, UInt16}
+const GridEntry = SIMD.Vec{8, UInt16}
 
 @inline function _grid_entry(a::GridAABB)::GridEntry
     GridEntry((a.hi[1], a.hi[2], a.hi[3], ~a.lo[1], ~a.lo[2], ~a.lo[3], a.index % UInt16, (a.index >> 16) % UInt16))
@@ -81,7 +81,7 @@ end
     GridEntry((a.lo[1], a.lo[2], a.lo[3], ~a.hi[1], ~a.hi[2], ~a.hi[3], 0x0000, 0x0000))
 end
 @inline function _grid_query(e::GridEntry)::GridEntry
-    shufflevector(~e, zero(GridEntry), Val((3, 4, 5, 0, 1, 2, 8, 8)))
+    SIMD.shufflevector(~e, zero(GridEntry), Val((3, 4, 5, 0, 1, 2, 8, 8)))
 end
 
 # Shift right by `s`, which is 16 at the coarsest level of an axis with 256
@@ -92,12 +92,12 @@ end
 
 # Lanes 3 to 5 hold the cell coordinates in the dedup check, the others are
 # always true.
-const GRID_DEDUP_LANES = Vec{8, Bool}((true, true, true, false, false, false, true, true))
+const GRID_DEDUP_LANES = SIMD.Vec{8, Bool}((true, true, true, false, false, false, true, true))
 
 # Return the lanes where the lower cell of a box at the shift `s` is the cell
 # `c`, given the lower bound of the box in lanes 3 to 5 of `lo_lanes` and the
 # cell coordinates in lanes 3 to 5 of `c`.
-@inline function _grid_lower_in_cell(lo_lanes::GridEntry, s::UInt8, c::GridEntry)::Vec{8, Bool}
+@inline function _grid_lower_in_cell(lo_lanes::GridEntry, s::UInt8, c::GridEntry)::SIMD.Vec{8, Bool}
     (_grid_entry_shift(lo_lanes, s) == c) | GRID_DEDUP_LANES
 end
 
@@ -105,7 +105,7 @@ end
 # `c` contains the lower corner of their intersection. A pair can touch
 # several common cells, so it is only checked in that one. Both boxes touch
 # `c`, so on each axis the larger of their lower cells is `c` iff either is.
-@inline function _grid_candidate(query::GridEntry, a_in_cell::Vec{8, Bool}, b::GridEntry, s::UInt8, c::GridEntry)::Bool
+@inline function _grid_candidate(query::GridEntry, a_in_cell::SIMD.Vec{8, Bool}, b::GridEntry, s::UInt8, c::GridEntry)::Bool
     all((query <= b) & (_grid_lower_in_cell(~b, s, c) | a_in_cell))
 end
 # TODO we could try to sneak in the results of _grid_lower_in_cell in 3 bits of idx
