@@ -149,6 +149,7 @@ let NL = NeighborLists{DefaultCollidePolicy, DefaultPairParams},
             )
             precompile(setup_neighbors_sort_sweep!, (NL, Pos, Inputs))
             precompile(setup_neighbors_naive!, (NL, Pos, Inputs))
+            precompile(setup_neighbors_grid!, (NL, Pos, Inputs))
         end
     end
 end

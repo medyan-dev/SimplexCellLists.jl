@@ -89,9 +89,9 @@ end
         function grid_size_reference(width, min_cell_width, max_cells)
             all(isfinite, width) || return SA[1, 1, 1]
             n = map(w -> Int(clamp(floor(w / min_cell_width), 1, 256)), width)
-            prod(n) ≤ max_cells && return n
+            # n must not be captured by a closure, it would get boxed
             while prod(n) > max_cells
-                h = minimum(i -> n[i] > 1 ? width[i] / n[i] : Inf, 1:3)
+                h = minimum(map((w, k) -> k > 1 ? w / k : Inf, width, n))
                 n = map((w, k) -> k > 1 && w / k ≤ h ? k - 1 : k, width, n)
             end
             n
@@ -153,19 +153,21 @@ end
     end
 
     all_lists(nl) = (nl.PPNL, nl.PCNL, nl.PLNL, nl.PTNL, nl.CCNL, nl.CLNL, nl.LLNL)
-    # The grid builds exactly the edges of the naive build. Subsets both ways
-    # plus equal lengths also rules out duplicate edges.
-    function test_grid_matches_naive(pos, inputs)
-        nl_naive = NeighborLists(policy)
+    # The grid builds exactly the edges of the sort and sweep build, which is
+    # tested against the naive build in test-neighbor-lists.jl and is much
+    # faster on large inputs. Subsets both ways plus equal lengths also rules
+    # out duplicate edges.
+    function test_grid_matches_sweep(pos, inputs)
+        nl_sweep = NeighborLists(policy)
         nl_grid = NeighborLists(policy)
-        setup_neighbors_naive!(nl_naive, pos, inputs)
+        setup_neighbors_sort_sweep!(nl_sweep, pos, inputs)
         setup_neighbors_grid!(nl_grid, pos, inputs)
-        @test is_neighbor_list_subset(nl_naive, nl_grid)
-        @test is_neighbor_list_subset(nl_grid, nl_naive)
-        @test map(length, all_lists(nl_grid)) == map(length, all_lists(nl_naive))
+        @test is_neighbor_list_subset(nl_sweep, nl_grid)
+        @test is_neighbor_list_subset(nl_grid, nl_sweep)
+        @test map(length, all_lists(nl_grid)) == map(length, all_lists(nl_sweep))
     end
 
-    @testset "Naive vs grid consistency" begin
+    @testset "Sweep vs grid consistency" begin
         # Random objects of every type with random layers, masks, zero
         # stiffness, and exclusions for every pair type.
         function random_inputs(rng; T = Float32, box_size = 50.0 + rand(rng) * 100.0,
@@ -243,7 +245,7 @@ end
         )
         rng = Xoshiro(2024)
         for kw in cases, trial in 1:50
-            test_grid_matches_naive(random_inputs(rng; kw...)...)
+            test_grid_matches_sweep(random_inputs(rng; kw...)...)
         end
     end
 
@@ -289,7 +291,7 @@ end
         end
         rng = Xoshiro(7)
         for exclude_bonded in (false, true), skin in (0.0f0, 0.1f0), trial in 1:3
-            test_grid_matches_naive(filament_inputs(rng, 1000; exclude_bonded, skin)...)
+            test_grid_matches_sweep(filament_inputs(rng, 1000; exclude_bonded, skin)...)
         end
     end
 
@@ -305,7 +307,7 @@ end
             pos = fill(p, 4)
             setup_neighbors_grid!(nl, pos, inputs)
             @test length(nl.PPNL) == 6
-            test_grid_matches_naive(pos, inputs)
+            test_grid_matches_sweep(pos, inputs)
         end
 
         # The bounds width overflowing to Inf errors
@@ -351,7 +353,7 @@ end
         @test length(nl.PPNL) == 1
         # Negative zero is allowed
         inputs = NeighborListInputs(policy; points, p_radius = [-0.0f0, 1.0f0], p_params = [on, on], skin = -0.0f0)
-        test_grid_matches_naive(pos, inputs)
+        test_grid_matches_sweep(pos, inputs)
     end
 
     @testset "Level assignment" begin
@@ -414,7 +416,7 @@ end
                 c_radius = Float32[0.1, 0.5, 2000],
                 c_params = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), 3),
             )
-            test_grid_matches_naive(pos, inputs)
+            test_grid_matches_sweep(pos, inputs)
         end
     end
 
@@ -429,7 +431,7 @@ end
         for r in (0.25f0, 0.5f0, 1.0f0, 2.0f0), skin in (0.0f0, 0.5f0, 1.0f0)
             pos = pts[randperm(rng, n)]
             inputs = NeighborListInputs(policy; points, p_radius = fill(r, n), p_params, skin)
-            test_grid_matches_naive(pos, inputs)
+            test_grid_matches_sweep(pos, inputs)
         end
     end
 
@@ -490,11 +492,11 @@ end
         for (r, skin) in ((Inf32, 0.0f0), (Inf32, 1.0f0), (0.0f0, 0.0f0), (0.0f0, 0.5f0), (1.0f0, 1f6))
             p_radius = fill(1.0f0, n)
             p_radius[7] = r
-            test_grid_matches_naive(pos, NeighborListInputs(policy; points, p_radius, p_params, skin))
+            test_grid_matches_sweep(pos, NeighborListInputs(policy; points, p_radius, p_params, skin))
         end
         # Every radius zero, with and without skin, and every radius infinite
         for (r, skin) in ((0.0f0, 0.0f0), (0.0f0, 1.0f0), (Inf32, 0.0f0))
-            test_grid_matches_naive(pos, NeighborListInputs(policy; points, p_radius = fill(r, n), p_params, skin))
+            test_grid_matches_sweep(pos, NeighborListInputs(policy; points, p_radius = fill(r, n), p_params, skin))
         end
     end
 
@@ -522,8 +524,8 @@ end
                 t_params = object_params(50),
                 skin = rand(rng, (0.0f0, 1.0f0)),
             )
-            test_grid_matches_naive(pos, inputs)
-            test_grid_matches_naive(pos_flat, inputs)
+            test_grid_matches_sweep(pos, inputs)
+            test_grid_matches_sweep(pos_flat, inputs)
         end
     end
 
@@ -545,7 +547,7 @@ end
             nl = NeighborLists(policy)
             setup_neighbors_grid!(nl, pos, inputs)
             @test length(nl.PPNL) == n_edges
-            test_grid_matches_naive(pos, inputs)
+            test_grid_matches_sweep(pos, inputs)
         end
     end
 
@@ -568,7 +570,7 @@ end
                 t_radius = fill(1.0f0, 2n_pos), t_params = object_params(2n_pos),
                 skin = rand(rng, (0.0f0, 2.0f0)),
             )
-            test_grid_matches_naive(pos, inputs)
+            test_grid_matches_sweep(pos, inputs)
         end
     end
 
