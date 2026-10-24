@@ -1,6 +1,5 @@
 module SimplexCellLists
 
-using LinearAlgebra: LinearAlgebra, cross, dot, ⋅
 using StaticArrays: StaticArrays, @SVector, SA, SVector
 using ArgCheck: @argcheck
 using SIMD: SIMD
@@ -13,6 +12,7 @@ const Triangle = Simplex{3}
 public Vec3, Simplex, Point, LineSeg, Triangle
 
 include("util.jl")
+public dot3, cross3, scale3, norm_fast
 
 include("distances.jl")
 export dist_sqr

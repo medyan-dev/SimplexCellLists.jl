@@ -33,7 +33,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     y2 = pos[edge.b.i + UInt32(1)]
     r = map(calc_type, y2 - y1)
     p = map(calc_type, x1 - y1)
-    t = clamp01nan((p⋅r)*inv(r⋅r))
+    t = clamp01nan(dot3(p, r)*inv(dot3(r, r)))
     d = t*r - p
     d2cl = sum(abs2, d)
     L0 = calc_type(edge.L)
@@ -57,7 +57,7 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     y2 = pos[edge.b.j]
     r = map(calc_type, y2 - y1)
     p = map(calc_type, x1 - y1)
-    t = clamp01nan((p⋅r)*inv(r⋅r))
+    t = clamp01nan(dot3(p, r)*inv(dot3(r, r)))
     d = t*r - p
     d2cl = sum(abs2, d)
     L0 = calc_type(edge.L)
@@ -89,12 +89,12 @@ Force on P0 can be computed as -(fp1+fq0+fq1)
     P = map(calc_type, P1-P0)
     Q = map(calc_type, Q1-Q0)
     P0mQ0 = map(calc_type, P0-Q0)
-    a = P ⋅ P
-    b = P ⋅ Q
-    c = Q ⋅ Q
-    d = P ⋅ P0mQ0
-    e = Q ⋅ P0mQ0
-    f = P0mQ0 ⋅ P0mQ0
+    a = dot3(P, P)
+    b = dot3(P, Q)
+    c = dot3(Q, Q)
+    d = dot3(P, P0mQ0)
+    e = dot3(Q, P0mQ0)
+    f = dot3(P0mQ0, P0mQ0)
     Δ = a*c - b^2
     #assuming both segments are not zero length
     #critical points
@@ -271,12 +271,12 @@ Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos
     E0 = map(calc_type, pos[edge.b.j] - B)
     E1 = map(calc_type, pos[edge.b.k] - B)
     BP = map(calc_type, B - P)
-    a = E0 ⋅ E0
-    b = E0 ⋅ E1
-    c = E1 ⋅ E1
-    d = E0 ⋅ BP
-    e = E1 ⋅ BP
-    f = BP ⋅ BP
+    a = dot3(E0, E0)
+    b = dot3(E0, E1)
+    c = dot3(E1, E1)
+    d = dot3(E0, BP)
+    e = dot3(E1, BP)
+    f = dot3(BP, BP)
     Δ = a*c - b^2
     invΔ = inv(Δ)
     sbar = clamp01nan((b*e - c*d)*invΔ)

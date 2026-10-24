@@ -108,7 +108,7 @@ function cell_point_add!(pcl::PointCellList{T,F}, pos::SVector{3, F}, id::T)::No
     # resulting index ≤ size - 1.
     pos_norm = clamp.(pos*h2_inv, -F.(sz), prevfloat.(F.(sz)))
     i = round2grid(pos_norm, sz)
-    li = i ⋅ strides
+    li = dot3(i, strides)
     entry = CellPointEntry{T,F}(pos, id)
     # li is inbounds because pos_norm is clamped to the grid, and cells has
     # length prod(sz).
@@ -177,7 +177,7 @@ function map_nearby_points(
                 for j in 1:cs.len
                     entry = @inbounds cs.list[j]
                     sep = entry.pos - pos
-                    d2 = sep ⋅ sep
+                    d2 = dot3(sep, sep)
                     d2 ≤ cutoff2 || continue
                     out, cont = f(entry, sep, out)
                     cont || return out
