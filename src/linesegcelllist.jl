@@ -151,7 +151,7 @@ function cell_line_seg_add!(scl::LineSegCellList{T,F}, p0::SVector{3, F}, p1::SV
     tMax_1, tMax_2, tMax_3 = ifelse.(at_wall .| isnan.(tMax_raw), F(Inf), tMax_raw)
     # DDA loop
     t_prev = zero(F) # parametric t at entry to current cell
-    li = i ⋅ strides
+    li = dot3(i, strides)
     X, Y, Z = i
     while true
         t_exit = min(tMax_1, tMax_2, tMax_3, seg_len)
@@ -245,10 +245,10 @@ function map_nearby_line_segs(
                     # closest point parameter on the whole line segment
                     tmax = cell_line_seg_tmax(entry)
                     pos_m_p0 = pos - entry.p0
-                    t = clamp(pos_m_p0 ⋅ entry.d_hat, zero(F), tmax)
+                    t = clamp(dot3(pos_m_p0, entry.d_hat), zero(F), tmax)
                     # distance check.
                     sep = t * entry.d_hat - pos_m_p0
-                    d2 = sep ⋅ sep
+                    d2 = dot3(sep, sep)
                     d2 ≤ cutoff2 || continue
                     # ownership check: tmin ≤ t < tmax, or is_end
                     t ≥ entry.tmin || continue

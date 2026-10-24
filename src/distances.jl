@@ -55,15 +55,15 @@ end
 
 function dist_sqr_r_s_t(x::Point{T}, y::Point{T}) where T
     d = y[1] - x[1]
-    d ⋅ d, d, SVector{0,T}(), SVector{0,T}()
+    dot3(d, d), d, SVector{0,T}(), SVector{0,T}()
 end
 
 function dist_sqr_r_s_t(x::Point{T}, y::LineSeg{T}) where T
     r = y[2] - y[1]
     p = x[1] - y[1]
-    t = clamp01nan((p ⋅ r)/(r ⋅ r))
-    d = t*r - p
-    d ⋅ d, d, SVector{0,T}(), SVector{1,T}(t)
+    t = clamp01nan(dot3(p, r)/dot3(r, r))
+    d = scale3(t, r) - p
+    dot3(d, d), d, SVector{0,T}(), SVector{1,T}(t)
 end
 
 #=
@@ -82,12 +82,12 @@ function dist_sqr_r_s_t(x::Point{T}, y::Triangle{T}) where T
     E0 = y[2] - B
     E1 = y[3] - B
     BP = B - P
-    a = E0 ⋅ E0
-    b = E0 ⋅ E1
-    c = E1 ⋅ E1
-    d = E0 ⋅ BP
-    e = E1 ⋅ BP
-    f = BP ⋅ BP
+    a = dot3(E0, E0)
+    b = dot3(E0, E1)
+    c = dot3(E1, E1)
+    d = dot3(E0, BP)
+    e = dot3(E1, BP)
+    f = dot3(BP, BP)
     Δ = a*c - b^2
     invΔ = inv(Δ)
     sbar = clamp01nan((b*e - c*d)*invΔ)
@@ -137,19 +137,19 @@ But not fully optimized.
 // https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
 // Version: 6.0.2022.01.06
 =#
-function dist_sqr(x::Point{T}, y::Triangle{T}) where T
+@inline function dist_sqr(x::Point{T}, y::Triangle{T}) where T
     P = x[1]
     B = y[1]
     E0 = y[3] - B
     E1 = y[2] - B
     BP = B - P
-    a = E0 ⋅ E0
-    b = E0 ⋅ E1
-    c = E1 ⋅ E1
-    d = E0 ⋅ BP
-    e = E1 ⋅ BP
-    f = BP ⋅ BP
-    Δ = a*c - b^2
+    a = dot3(E0, E0)
+    b = dot3(E0, E1)
+    c = dot3(E1, E1)
+    d = dot3(E0, BP)
+    e = dot3(E1, BP)
+    f = dot3(BP, BP)
+    Δ = a*c - b*b
     invΔ = inv(Δ)
     sbar = clamp01nan((b*e - c*d)*invΔ)
     tbar = clamp01nan((-a*e + b*d)*invΔ)
@@ -163,11 +163,11 @@ function dist_sqr(x::Point{T}, y::Triangle{T}) where T
     t0 = clamp01nan(-e/c)
     sd = clamp01nan(-(b-c+d-e)/(a-2b+c))
     td = one(sd) - sd
-    q(s,t) = a*s^2 + 2b*s*t + c*t^2 + 2d*s + 2e*t
+    @inline q(s,t) = a*(s*s) + 2b*s*t + c*(t*t) + 2d*s + 2e*t
     
     Base.FastMath.max_fast(zero(sd),f + Base.FastMath.min_fast(
-        q(s0,false),
-        q(false,t0),
+        q(s0,zero(a)),
+        q(zero(a),t0),
         q(sd,td),
         q(sbar,tbar),
     ))
@@ -192,12 +192,12 @@ function dist_sqr_r_s_t(x::LineSeg{T}, y::LineSeg{T}) where T
     P = P1-P0
     Q = Q1-Q0
     P0mQ0 = P0 - Q0
-    a = P ⋅ P
-    b = P ⋅ Q
-    c = Q ⋅ Q
-    d = P ⋅ P0mQ0
-    e = Q ⋅ P0mQ0
-    f = P0mQ0 ⋅ P0mQ0
+    a = dot3(P, P)
+    b = dot3(P, Q)
+    c = dot3(Q, Q)
+    d = dot3(P, P0mQ0)
+    e = dot3(Q, P0mQ0)
+    f = dot3(P0mQ0, P0mQ0)
     Δ = a*c - b^2
     #assuming both segments are not zero length
     #critical points
@@ -247,7 +247,7 @@ https://www.geometrictools.com/Documentation/DistanceLine3Line3.pdf
 // Version: 6.0.2022.01.06
 Ignores the case of degenerate line segments.
 =#
-function dist_sqr(x::LineSeg{T}, y::LineSeg{T}) where T
+@inline function dist_sqr(x::LineSeg{T}, y::LineSeg{T}) where T
     P0 = x[1]
     P1 = x[2]
     Q0 = y[1]
@@ -255,13 +255,13 @@ function dist_sqr(x::LineSeg{T}, y::LineSeg{T}) where T
     P = P1-P0
     Q = Q1-Q0
     P0mQ0 = P0 - Q0
-    a = P ⋅ P
-    b = P ⋅ Q
-    c = Q ⋅ Q
-    d = P ⋅ P0mQ0
-    e = Q ⋅ P0mQ0
-    f = P0mQ0 ⋅ P0mQ0
-    Δ = a*c - b^2
+    a = dot3(P, P)
+    b = dot3(P, Q)
+    c = dot3(Q, Q)
+    d = dot3(P, P0mQ0)
+    e = dot3(Q, P0mQ0)
+    f = dot3(P0mQ0, P0mQ0)
+    Δ = a*c - b*b
     invΔ = inv(Δ)
     #assuming both segments are not zero length
     #critical points
@@ -271,12 +271,12 @@ function dist_sqr(x::LineSeg{T}, y::LineSeg{T}) where T
     t1 = clamp01nan((b+e)/c)
     sbar = clamp01nan((b*e - c*d)*invΔ)
     tbar = clamp01nan((a*e - b*d)*invΔ)
-    r(s,t) = a*s^2 - 2b*s*t + c*t^2 + 2d*s - 2e*t
+    @inline r(s,t) = a*(s*s) - 2b*s*t + c*(t*t) + 2d*s - 2e*t
     Base.FastMath.max_fast(zero(s0),f+Base.FastMath.min_fast(
-        r(s0,false),
-        r(s1,true),
-        r(false,t0),
-        r(true,t1),
+        r(s0,zero(a)),
+        r(s1,one(a)),
+        r(zero(a),t0),
+        r(one(a),t1),
         r(sbar,tbar),
     ))
 end
@@ -306,8 +306,8 @@ function moller_trumbore_intersect(o, d, a, b, c)
 
     rab = b - a
     rac = c - a
-    cross_d_rac = cross(d, rac)
-    det = dot(cross_d_rac, rab)
+    cross_d_rac = cross3(d, rac)
+    det = dot3(cross_d_rac, rab)
 
     if det == zero(det)
         return seg_triangle_no_intersect
@@ -315,18 +315,18 @@ function moller_trumbore_intersect(o, d, a, b, c)
 
     invdet = inv(det)
     rao = o - a
-    u = dot(cross_d_rac, rao) * invdet
+    u = dot3(cross_d_rac, rao) * invdet
     if u < 0 || u > 1
         return seg_triangle_no_intersect
     end
 
-    cross_rao_rab = cross(rao, rab)
-    v = dot(cross_rao_rab, d) * invdet
+    cross_rao_rab = cross3(rao, rab)
+    v = dot3(cross_rao_rab, d) * invdet
     if v < 0 || u + v > 1
         return seg_triangle_no_intersect
     end
 
-    t = dot(cross_rao_rab, rac) * invdet
+    t = dot3(cross_rao_rab, rac) * invdet
     if t < 0 || t > 1
         return seg_triangle_no_intersect
     end
