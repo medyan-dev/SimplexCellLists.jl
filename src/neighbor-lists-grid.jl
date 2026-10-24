@@ -493,8 +493,9 @@ box, so it touches at most 8 cells there. Produces the
 same set of edges as [`setup_neighbors_naive!`](@ref) and
 [`setup_neighbors_sort_sweep!`](@ref).
 
-Throws an `ArgumentError` if `inputs.skin` is negative or NaN, or if the
-radius of any object that passes `filter_object` is negative or NaN.
+Throws an `ArgumentError` if `inputs.skin` is negative or NaN. May also throw
+an `ArgumentError` if the radius of any object that passes `filter_object` is
+negative or NaN.
 """
 function setup_neighbors_grid!(s::NeighborLists, pos, inputs::NeighborListInputs)::Nothing
     _argcheck_neighbor_list_input(inputs)

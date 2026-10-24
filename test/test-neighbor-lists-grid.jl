@@ -3,6 +3,20 @@ using Test
 using StaticArrays
 using Random
 
+# A policy where filtering depends on the object type and index, and the
+# pair params record the argument order, so the grid must call the policy
+# with the same arguments as the naive build.
+struct GridTestPolicy <: SimplexCellLists.CollidePolicy{Int, Tuple{Int, Int, CollideObjectTypes, CollideObjectTypes}} end
+function SimplexCellLists.filter_object(::GridTestPolicy, p::Int, t::CollideObjectTypes, i::UInt32, r::Float32)
+    (p + Int(t) + Int(i)) % 3 != 0
+end
+function SimplexCellLists.filter_pair(::GridTestPolicy, a::Int, b::Int, ta, tb, i, j, ra, rb)
+    (a * b + Int(i) * Int(j)) % 5 != 0
+end
+function SimplexCellLists.mix_params(::GridTestPolicy, a::Int, b::Int, ta, tb, i, j, ra, rb)
+    (Int(i), Int(j), ta, tb)
+end
+
 @testset "neighborlists grid" begin
     policy = DefaultCollidePolicy()
     @testset "_grid_size" begin
@@ -338,6 +352,224 @@ using Random
         # Negative zero is allowed
         inputs = NeighborListInputs(policy; points, p_radius = [-0.0f0, 1.0f0], p_params = [on, on], skin = -0.0f0)
         test_grid_matches_naive(pos, inputs)
+    end
+
+    @testset "Level assignment" begin
+        _grid_level = SimplexCellLists._grid_level
+        _grid_cells = SimplexCellLists._grid_cells
+        aabb(lo, hi) = SimplexCellLists.GridAABB(SVector{3, UInt16}(lo), SVector{3, UInt16}(hi), UInt32(1))
+        # Level k cells are 256 * 2^k units wide, a box of span d goes to the
+        # finest level with d < 256 * 2^k
+        for (span, level) in ((0, 0), (255, 0), (256, 1), (511, 1), (512, 2), (1023, 2), (1024, 3), (32767, 7), (32768, 8), (65535, 8))
+            @test _grid_level(aabb((0, 0, 0), (span, 0, 0)), 0x09) == level
+            @test _grid_level(aabb((0, 0, 0), (0, span, 0)), 0x09) == level
+            @test _grid_level(aabb((0, 0, 0), (0, 0, span)), 0x09) == level
+            # The level only depends on the span, not the position
+            span + 300 ≤ typemax(UInt16) && @test _grid_level(aabb((100, 200, 300), (100, 200, 300 + span)), 0x09) == level
+            # Capped at the coarsest level
+            @test _grid_level(aabb((0, 0, 0), (span, 0, 0)), 0x01) == 0
+            @test _grid_level(aabb((0, 0, 0), (span, 0, 0)), 0x03) == min(level, 2)
+        end
+        # At its level a box touches at most two cells along each axis, and
+        # a box's cells are within the grid at every level
+        rng = Xoshiro(5)
+        for trial in 1:10^4
+            n = SVector{3}(rand(rng, (1, 2, 3, 17, 255, 256)) for _ in 1:3)
+            n_levels = UInt8(1 + maximum(k -> Base.top_set_bit(k - 1), n))
+            last_unit = 256 .* n .- 1
+            lo = SVector{3}(rand(rng, 0:last_unit[i]) for i in 1:3)
+            hi = SVector{3}(rand(rng, lo[i]:last_unit[i]) for i in 1:3)
+            a = aabb(lo, hi)
+            k = _grid_level(a, n_levels)
+            @test all(_grid_cells(a.hi, k) .- _grid_cells(a.lo, k) .≤ 1)
+            for l in 0x00:(n_levels - 0x01)
+                n_l = ((n .- 1) .>> l) .+ 1
+                @test all(0 .≤ _grid_cells(a.lo, l)) && all(_grid_cells(a.hi, l) .< n_l)
+            end
+        end
+    end
+
+    @testset "Coarsest level with 256 cells" begin
+        # A long thin box of small points gets 256 cells along x, so the
+        # coarsest level is 8, where cell coordinates are the unit intervals
+        # shifted by 16. Objects spanning the box live there, and are checked
+        # against each other and against the points at level 0.
+        @test SimplexCellLists._grid_size(SVector{3, Float32}(1f4, 2, 2), 0.4f0, 1007) == SA[256, 1, 1]
+        rng = Xoshiro(1)
+        for trial in 1:5
+            n = 1000
+            pos = [SVector{3, Float32}(rand(rng) * 1f4, rand(rng) * 2, rand(rng) * 2) for _ in 1:n]
+            push!(pos, SVector{3, Float32}(0, 1, 1), SVector{3, Float32}(1f4, 1, 1))
+            push!(pos, SVector{3, Float32}(5000, 0, 0), SVector{3, Float32}(5000.5, 2, 2))
+            inputs = NeighborListInputs(policy;
+                points = [PointIdxPart(i) for i in 1:n],
+                p_radius = fill(1.0f0, n),
+                p_params = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), n),
+                # Lines spanning the box, a short line with a huge radius, and
+                # a random line
+                lines = [LineIdxPart(n + 1, n + 2), LineIdxPart(n + 1, n + 3), LineIdxPart(n + 3, n + 4), LineIdxPart(rand(rng, 1:n), rand(rng, 1:n))],
+                l_radius = Float32[0.1, 1, 100, 1],
+                l_params = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), 4),
+                clines = [CLineIdxPart(n + 1), CLineIdxPart(n + 3), CLineIdxPart(rand(rng, 1:n))],
+                c_radius = Float32[0.1, 0.5, 2000],
+                c_params = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), 3),
+            )
+            test_grid_matches_naive(pos, inputs)
+        end
+    end
+
+    @testset "Positions on cell boundaries" begin
+        # A lattice of points where the cell and unit interval boundaries
+        # fall exactly on positions and padded box edges
+        rng = Xoshiro(2)
+        pts = [SVector{3, Float32}(x, y, z) for x in 0:16 for y in 0:16 for z in 0:16]
+        n = length(pts)
+        points = [PointIdxPart(i) for i in 1:n]
+        p_params = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), n)
+        for r in (0.25f0, 0.5f0, 1.0f0, 2.0f0), skin in (0.0f0, 0.5f0, 1.0f0)
+            pos = pts[randperm(rng, n)]
+            inputs = NeighborListInputs(policy; points, p_radius = fill(r, n), p_params, skin)
+            test_grid_matches_naive(pos, inputs)
+        end
+    end
+
+    @testset "Custom policy" begin
+        # Filtering by type and index, pair rejection, exclusions, and pair
+        # params that record the argument order
+        rng = Xoshiro(3)
+        test_policy = GridTestPolicy()
+        for trial in 1:100
+            n_pos = rand(rng, 20:100)
+            box = rand(rng, (1.0, 10.0, 100.0))
+            pos = [SVector{3, Float32}(rand(rng, 3) .* box) for _ in 1:n_pos]
+            n = (
+                p = rand(rng, 0:40), c = rand(rng, 0:40), l = rand(rng, 0:40), lp = rand(rng, 0:20),
+                t = rand(rng, 0:30), tl = rand(rng, 0:20), tp = rand(rng, 0:20),
+            )
+            radius(k) = Float32.(rand(rng, (0.0, 0.1, 1.0, 5.0, 50.0), k))
+            params(k) = rand(rng, 0:10, k)
+            no_collide_pairs = empty_no_collide_pairs()
+            for pair in instances(CollidePairs), _ in 1:rand(rng, 0:5)
+                push!(no_collide_pairs[Int(pair)], UInt32(rand(rng, 1:40)) => UInt32(rand(rng, 1:40)))
+            end
+            inputs = NeighborListInputs(test_policy;
+                points = [PointIdxPart(rand(rng, 1:n_pos)) for _ in 1:n.p],
+                p_radius = radius(n.p), p_params = params(n.p),
+                clines = [CLineIdxPart(rand(rng, 1:n_pos-1)) for _ in 1:n.c],
+                c_radius = radius(n.c), c_params = params(n.c),
+                lines = [LineIdxPart(rand(rng, 1:n_pos), rand(rng, 1:n_pos)) for _ in 1:n.l],
+                l_radius = radius(n.l), l_params = params(n.l),
+                line_points = [PointIdxPart(rand(rng, 1:n_pos)) for _ in 1:n.lp],
+                lp_radius = radius(n.lp), lp_params = params(n.lp),
+                triangles = [TriangleIdxPart(rand(rng, 1:n_pos), rand(rng, 1:n_pos), rand(rng, 1:n_pos)) for _ in 1:n.t],
+                t_radius = radius(n.t), t_params = params(n.t),
+                triangle_lines = [LineIdxPart(rand(rng, 1:n_pos), rand(rng, 1:n_pos)) for _ in 1:n.tl],
+                tl_radius = radius(n.tl), tl_params = params(n.tl),
+                triangle_points = [PointIdxPart(rand(rng, 1:n_pos)) for _ in 1:n.tp],
+                tp_radius = radius(n.tp), tp_params = params(n.tp),
+                no_collide_pairs, skin = rand(rng, (0.0f0, 0.0f0, 0.3f0, 10.0f0)),
+            )
+            nl_naive = NeighborLists(test_policy)
+            nl_grid = NeighborLists(test_policy)
+            setup_neighbors_naive!(nl_naive, pos, inputs)
+            setup_neighbors_grid!(nl_grid, pos, inputs)
+            @test is_neighbor_list_subset(nl_naive, nl_grid)
+            @test is_neighbor_list_subset(nl_grid, nl_naive)
+            @test map(length, all_lists(nl_grid)) == map(length, all_lists(nl_naive))
+        end
+    end
+
+    @testset "Extreme radii and skin" begin
+        rng = Xoshiro(4)
+        n = 50
+        pos = [SVector{3, Float32}(rand(rng, 3) .* 100) for _ in 1:n]
+        points = [PointIdxPart(i) for i in 1:n]
+        p_params = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), n)
+        # One object with an infinite or zero radius among ordinary ones, and
+        # a skin much larger than the box
+        for (r, skin) in ((Inf32, 0.0f0), (Inf32, 1.0f0), (0.0f0, 0.0f0), (0.0f0, 0.5f0), (1.0f0, 1f6))
+            p_radius = fill(1.0f0, n)
+            p_radius[7] = r
+            test_grid_matches_naive(pos, NeighborListInputs(policy; points, p_radius, p_params, skin))
+        end
+        # Every radius zero, with and without skin, and every radius infinite
+        for (r, skin) in ((0.0f0, 0.0f0), (0.0f0, 1.0f0), (Inf32, 0.0f0))
+            test_grid_matches_naive(pos, NeighborListInputs(policy; points, p_radius = fill(r, n), p_params, skin))
+        end
+    end
+
+    @testset "Sizes spanning every level" begin
+        # Radii from a tenth to a thousand in a box a thousand wide put
+        # objects at every level, far from the origin, with positions as a
+        # vector or a reinterpreted flat array
+        rng = Xoshiro(5)
+        object_params(k) = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), k)
+        for T in (Float32, Float64), offset in (0.0, 1e5, -3e6), trial in 1:5
+            n_pos = 300
+            pos = [SVector{3, T}(rand(rng, 3) .* 1000 .+ offset) for _ in 1:n_pos]
+            flat = collect(reinterpret(T, pos))
+            pos_flat = reinterpret(SVector{3, T}, flat)
+            n = 400
+            inputs = NeighborListInputs(policy;
+                points = [PointIdxPart(rand(rng, 1:n_pos)) for _ in 1:n],
+                p_radius = Float32.(exp10.(rand(rng, n) .* 4 .- 1)),
+                p_params = object_params(n),
+                lines = [LineIdxPart(rand(rng, 1:n_pos), rand(rng, 1:n_pos)) for _ in 1:100],
+                l_radius = Float32.(exp10.(rand(rng, 100) .* 3 .- 1)),
+                l_params = object_params(100),
+                triangles = [TriangleIdxPart(rand(rng, 1:n_pos), rand(rng, 1:n_pos), rand(rng, 1:n_pos)) for _ in 1:50],
+                t_radius = fill(0.1f0, 50),
+                t_params = object_params(50),
+                skin = rand(rng, (0.0f0, 1.0f0)),
+            )
+            test_grid_matches_naive(pos, inputs)
+            test_grid_matches_naive(pos_flat, inputs)
+        end
+    end
+
+    @testset "Few objects" begin
+        pos = [SVector{3, Float32}(0, 0, 0), SVector{3, Float32}(1, 0, 0), SVector{3, Float32}(100, 0, 0)]
+        for (pts, radii, n_edges) in (
+                # Just out of range, in range, and at the cutoff
+                ([1, 2], [0.4f0, 0.4f0], 0), ([1, 2], [0.6f0, 0.6f0], 1), ([1, 2], [0.5f0, 0.5f0], 0),
+                ([1, 3], [49.0f0, 50.0f0], 0), ([1, 3], [50.0f0, 51.0f0], 1),
+                ([1, 2, 3], [0.5f0, 0.5f0, 0.5f0], 0), ([1, 2, 3], [1.0f0, 1.0f0, 1.0f0], 1),
+                # Coincident points, with and without a radius
+                ([1, 1], [0.0f0, 0.0f0], 0), ([1, 1, 1], [1.0f0, 1.0f0, 1.0f0], 3),
+            )
+            inputs = NeighborListInputs(policy;
+                points = PointIdxPart.(pts),
+                p_radius = radii,
+                p_params = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), length(pts)),
+            )
+            nl = NeighborLists(policy)
+            setup_neighbors_grid!(nl, pos, inputs)
+            @test length(nl.PPNL) == n_edges
+            test_grid_matches_naive(pos, inputs)
+        end
+    end
+
+    @testset "Degenerate simplices" begin
+        # Lines and triangles with repeated vertices have zero width boxes
+        # along some axes
+        rng = Xoshiro(7)
+        for trial in 1:20
+            n_pos = 40
+            pos = [SVector{3, Float32}(rand(rng, 3) .* 20) for _ in 1:n_pos]
+            triangles = [TriangleIdxPart(i, i, i) for i in 1:n_pos]
+            append!(triangles, [TriangleIdxPart(i, i, mod1(i + 1, n_pos)) for i in 1:n_pos])
+            object_params(k) = fill(DefaultObjectParams(1.0f0, UInt32(1), UInt32(0)), k)
+            inputs = NeighborListInputs(policy;
+                points = [PointIdxPart(i) for i in 1:n_pos],
+                p_radius = fill(1.0f0, n_pos), p_params = object_params(n_pos),
+                lines = [LineIdxPart(i, i) for i in 1:n_pos],
+                l_radius = fill(1.0f0, n_pos), l_params = object_params(n_pos),
+                triangles,
+                t_radius = fill(1.0f0, 2n_pos), t_params = object_params(2n_pos),
+                skin = rand(rng, (0.0f0, 2.0f0)),
+            )
+            test_grid_matches_naive(pos, inputs)
+        end
     end
 
     @testset "Repeated builds" begin
