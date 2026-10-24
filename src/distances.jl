@@ -51,6 +51,13 @@ function dist_sqr(x::Simplex{2, T}, y::Simplex{1, T}) where T
     @inline dist_sqr(y, x)
 end
 
+# Branch free update of the running minimum `r` and its `s` and `t`.
+# Works on `SIMD.Vec` lanes. Ties keep the earlier minimum.
+@inline function _min_r_s_t(minr, mins, mint, r, s, t)
+    better = r < minr
+    SIMD.vifelse(better, r, minr), SIMD.vifelse(better, s, mins), SIMD.vifelse(better, t, mint)
+end
+
 # The methods
 
 function dist_sqr_r_s_t(x::Point{T}, y::Point{T}) where T
@@ -88,7 +95,7 @@ function dist_sqr_r_s_t(x::Point{T}, y::Triangle{T}) where T
     d = dot3(E0, BP)
     e = dot3(E1, BP)
     f = dot3(BP, BP)
-    Δ = a*c - b^2
+    Δ = a*c - b*b
     invΔ = inv(Δ)
     sbar = clamp01nan((b*e - c*d)*invΔ)
     tbar = clamp01nan((-a*e + b*d)*invΔ)
@@ -96,34 +103,22 @@ function dist_sqr_r_s_t(x::Point{T}, y::Triangle{T}) where T
     # this ensures sbar and tbar are in the domain
     # if they are out of the domain, the min distance is on a boundary
     outside = sbar+tbar > one(sbar)
-    sbar = ifelse(outside,zero(sbar),sbar)
-    tbar = ifelse(outside,zero(tbar),tbar)
+    sbar = SIMD.vifelse(outside,zero(sbar),sbar)
+    tbar = SIMD.vifelse(outside,zero(tbar),tbar)
     s0 = clamp01nan(-d/a)
     t0 = clamp01nan(-e/c)
     sd = clamp01nan(-(b-c+d-e)/(a-2b+c))
     td = one(sd) - sd
-    r(s,t) = a*s^2 + 2b*s*t + c*t^2 + 2d*s + 2e*t
+    @inline r(s,t) = a*(s*s) + 2b*s*t + c*(t*t) + 2d*s + 2e*t
 
     mins = sbar
     mint = tbar
     minr = r(sbar,tbar)
-    if  r(s0,false) < minr
-        minr = r(s0,false)
-        mins = s0
-        mint = zero(a)
-    end
-    if  r(false,t0) < minr
-        minr = r(false,t0)
-        mins = zero(a)
-        mint = t0
-    end
-    if  r(sd,td) < minr
-        minr = r(sd,td)
-        mins = sd
-        mint = td
-    end
+    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(s0,zero(a)), s0, zero(a))
+    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(zero(a),t0), zero(a), t0)
+    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(sd,td), sd, td)
     d2cl = Base.FastMath.max_fast(zero(a),f+minr)
-    rcl = mins*E0 + mint*E1 + BP
+    rcl = scale3(mins, E0) + scale3(mint, E1) + BP
     d2cl, rcl, SVector{0,T}(), SVector{2,T}(mins, mint)
 end
 
@@ -157,8 +152,8 @@ But not fully optimized.
     # this ensures sbar and tbar are in the domain
     # if they are out of the domain, the min distance is on a boundary
     outside = sbar+tbar > one(sbar)
-    sbar = ifelse(outside,zero(sbar),sbar)
-    tbar = ifelse(outside,zero(tbar),tbar)
+    sbar = SIMD.vifelse(outside,zero(sbar),sbar)
+    tbar = SIMD.vifelse(outside,zero(tbar),tbar)
     s0 = clamp01nan(-d/a)
     t0 = clamp01nan(-e/c)
     sd = clamp01nan(-(b-c+d-e)/(a-2b+c))
@@ -198,7 +193,7 @@ function dist_sqr_r_s_t(x::LineSeg{T}, y::LineSeg{T}) where T
     d = dot3(P, P0mQ0)
     e = dot3(Q, P0mQ0)
     f = dot3(P0mQ0, P0mQ0)
-    Δ = a*c - b^2
+    Δ = a*c - b*b
     #assuming both segments are not zero length
     #critical points
     s0 = clamp01nan(-d/a)
@@ -207,32 +202,16 @@ function dist_sqr_r_s_t(x::LineSeg{T}, y::LineSeg{T}) where T
     t1 = clamp01nan((b+e)/c)
     sbar = clamp01nan((b*e - c*d)/Δ)
     tbar = clamp01nan((a*e - b*d)/Δ)
-    r(s,t) = a*s^2 - 2b*s*t + c*t^2 + 2d*s - 2e*t
+    @inline r(s,t) = a*(s*s) - 2b*s*t + c*(t*t) + 2d*s - 2e*t
     mins = sbar
     mint = tbar
     minr = r(sbar,tbar)
-    if  r(s0,false) < minr
-        minr = r(s0,false)
-        mins = s0
-        mint = zero(a)
-    end
-    if  r(s1,true) < minr
-        minr = r(s1,true)
-        mins = s1
-        mint = one(a)
-    end
-    if  r(false,t0) < minr
-        minr = r(false,t0)
-        mins = zero(a)
-        mint = t0
-    end
-    if  r(true,t1) < minr
-        minr = r(true,t1)
-        mins = one(a)
-        mint = t1
-    end
+    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(s0,zero(a)), s0, zero(a))
+    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(s1,one(a)), s1, one(a))
+    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(zero(a),t0), zero(a), t0)
+    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(one(a),t1), one(a), t1)
     d2cl = Base.FastMath.max_fast(zero(a),f+minr)
-    rcl = (mint*Q - mins*P) - P0mQ0
+    rcl = (scale3(mint, Q) - scale3(mins, P)) - P0mQ0
     d2cl, rcl, SVector{1,T}(mins), SVector{1,T}(mint)
 end
 
