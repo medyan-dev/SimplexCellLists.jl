@@ -75,4 +75,36 @@ end
     # This issue was resolved in https://github.com/oxfordcontrol/Clarabel.jl/pull/114
     @test ref_d2min ≈ d2min atol = 1E-11 rtol = 1E-11
 end
+
+# Return `W` simplices as one simplex with a lane per simplex.
+function simplex_lanes(xs::NTuple{W, SVector{N, SVector{3, T}}}) where {W, N, T}
+    SVector{N}(ntuple(Val(N)) do v
+        SVector{3}(ntuple(Val(3)) do k
+            SimplexCellLists.SIMD.Vec{W, T}(ntuple(l -> xs[l][v][k], Val(W)))
+        end)
+    end)
+end
+
+# Return a random simplex, half the time with coordinates in -1:1, so
+# parallel, collinear, coincident, and zero length cases are common.
+function rand_simplex(::Type{T}, N) where T
+    if rand(Bool)
+        SVector{N}(ntuple(_ -> SVector{3, T}(rand(-1:1, 3)), N))
+    else
+        rand(SVector{N, SVector{3, T}})
+    end
+end
+
+# The grid neighbor list checks distances several pairs at a time, which
+# must give bit identical results to the scalar version.
+@testset "dist_sqr on SIMD lanes $T $N to $M" for T in (Float32, Float64),
+        (N, M) in ((1, 1), (1, 2), (2, 1), (1, 3), (3, 1), (2, 2))
+    W = 8
+    for trial in 1:500
+        as = ntuple(_ -> rand_simplex(T, N), Val(W))
+        bs = ntuple(_ -> rand_simplex(T, M), Val(W))
+        d2 = dist_sqr(simplex_lanes(as), simplex_lanes(bs))
+        @test all(l -> d2[l] === dist_sqr(as[l], bs[l]), 1:W)
+    end
+end
 nothing
