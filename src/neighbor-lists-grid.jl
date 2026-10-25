@@ -125,17 +125,31 @@ end
 # Initial number of candidate pairs buffered before the narrow phase runs,
 # small enough that the buffer stays in cache.
 const GRID_CANDIDATE_CHUNK = 1024
+# Pairs checked at once by the narrow phase distance check.
+const GRID_SIMD_WIDTH = 8
 
 # The first `n` of `pairs` are the candidate pairs of one pair type found by
 # the broad phase, waiting for the narrow phase, as `i => j` with `i` the
 # index of the `a` object and `j` of the `b` object, in the order of
 # `NeighborListEdge`, which for pairs of the same type is the smaller index
-# first.
-mutable struct GridCandidates
+# first. The last `GRID_SIMD_WIDTH - 1` of `pairs` are padding, so the
+# narrow phase can always check whole groups of pairs, see
+# `_grid_distance_pass!`. `d2` is scratch space for the narrow phase, as
+# long as `pairs`, with the element type `T` of the positions.
+mutable struct GridCandidates{T}
     pairs::Memory{Pair{UInt32, UInt32}}
+    d2::Memory{T}
     n::Int
 end
-GridCandidates() = GridCandidates(Memory{Pair{UInt32, UInt32}}(undef, GRID_CANDIDATE_CHUNK), 0)
+GridCandidates{T}() where T = GridCandidates{T}(GRID_CANDIDATE_CHUNK)
+# Room for `capacity` candidates
+function GridCandidates{T}(capacity::Int) where T
+    local len = capacity + GRID_SIMD_WIDTH - 1
+    GridCandidates{T}(Memory{Pair{UInt32, UInt32}}(undef, len), Memory{T}(undef, len), 0)
+end
+
+# Return the number of candidates `cands` has room for, without the padding.
+_grid_capacity(cands::GridCandidates)::Int = length(cands.pairs) - (GRID_SIMD_WIDTH - 1)
 
 # Make room for `extra` more candidates of `pair_type`, by running the
 # narrow phase if they don't fit, and growing the buffer if they don't fit
@@ -145,31 +159,71 @@ GridCandidates() = GridCandidates(Memory{Pair{UInt32, UInt32}}(undef, GRID_CANDI
 # branching on it: it writes every pair it checks at `n + 1` and only
 # advances `n` for overlapping pairs, which needs room for the whole run.
 @inline function _grid_make_room!(cands::GridCandidates, extra::Int, pos, policy, extra_cutoff, pair_type::GridPairType)
-    if cands.n + extra > length(cands.pairs)
+    if cands.n + extra > _grid_capacity(cands)
         _grid_narrow_phase!(cands, pos, policy, extra_cutoff, pair_type)
         @assert iszero(cands.n)
         # Over allocate, so later runs from crowded cells fit too. More than
-        # doubles the buffer, since `extra` is more than its length.
-        if extra > length(cands.pairs)
-            cands.pairs = Memory{Pair{UInt32, UInt32}}(undef, 2 * extra)
+        # doubles the buffer, since `extra` is more than its capacity.
+        if extra > _grid_capacity(cands)
+            local grown = typeof(cands)(2 * extra)
+            cands.pairs = grown.pairs
+            cands.d2 = grown.d2
         end
     end
     nothing
 end
 
+# Return `pairs[k:k + W - 1]` as a tuple.
+@inline function _grid_load_pairs(pairs::Memory{Pair{UInt32, UInt32}}, k::Int, ::Val{W}) where W
+    ntuple(l -> @inbounds(pairs[k + l - 1]), Val(W))
+end
+
+# Return the simplices of the objects `objs[idx]` as one simplex whose
+# coordinates have a lane per object. The indexes were checked when the
+# objects were quantized.
+@inline function _grid_lanes(pos, objs, idx::Tuple{UInt32, Vararg{UInt32, M}}) where M
+    local simplices = ntuple(l -> @inbounds(load_positions(pos, objs[idx[l]])), Val(M + 1))
+    SVector(ntuple(Val(length(first(simplices)))) do v
+        SVector(ntuple(Val(3)) do axis
+            SIMD.Vec(ntuple(l -> simplices[l][v][axis], Val(M + 1)))
+        end)
+    end)
+end
+
 # Keep the buffered candidates within the cutoff distance, compacting them
 # to the first `m` for the returned `m`. The distance check is the one of
-# `setup_neighbors_naive!`.
+# `setup_neighbors_naive!`, done `GRID_SIMD_WIDTH` pairs at a time, which
+# gives identical results since the distance functions do the same
+# operations on every lane. The last group is padded with copies of the
+# last pair.
 function _grid_distance_pass!(cands::GridCandidates, pos, extra_cutoff, a_objs, a_r, b_objs, b_r)::Int
     local pairs = cands.pairs
+    local d2s = cands.d2
+    local n = cands.n
+    iszero(n) && return 0
+    local last_pair = @inbounds pairs[n]
+    for k in (n + 1):(n + GRID_SIMD_WIDTH - 1)
+        @inbounds pairs[k] = last_pair
+    end
+    # The distances go to their own loop and buffer, so the groups are
+    # independent. Checking the cutoff and compacting in this loop makes
+    # each group wait for the previous one, and makes LLVM load the
+    # indexes of a group as a vector and extract them one by one before
+    # loading the positions, both about twice as slow.
+    for k in 1:GRID_SIMD_WIDTH:n
+        local group = _grid_load_pairs(pairs, k, Val(GRID_SIMD_WIDTH))
+        local d2 = dist_sqr(_grid_lanes(pos, a_objs, map(first, group)), _grid_lanes(pos, b_objs, map(last, group)))
+        @inbounds SIMD.vstore(d2, d2s, k)
+    end
+    # Branchless compaction, the writes never pass the reads. The cutoff
+    # check is per pair with scalar loads of the radii, since LLVM turns
+    # the vector version into slow gather instructions.
     local m = 0
-    for k in 1:cands.n
+    for k in 1:n
         local (i, j) = @inbounds pairs[k]
-        local d2 = dist_sqr(load_positions(pos, a_objs[i]), load_positions(pos, b_objs[j]))
-        local cutoff = a_r[i] + b_r[j] + extra_cutoff
-        # Branchless compaction, the writes never pass the reads
+        local cutoff = @inbounds a_r[i] + b_r[j] + extra_cutoff
         @inbounds pairs[m + 1] = i => j
-        m += d2 < cutoff^2
+        m += @inbounds(d2s[k]) < cutoff^2
     end
     m
 end
@@ -662,7 +716,7 @@ function setup_neighbors_grid!(s::NeighborLists, pos, inputs::NeighborListInputs
 
     # Each pair type, like `setup_neighbors_naive!`
     extra_cutoff = 2skin
-    cands = GridCandidates()
+    cands = GridCandidates{PTYPE}()
     args = (levels, counts, level_of, aabbs, type_ranges, cands, pos, policy, extra_cutoff)
     ncp = no_collide_pairs
     _grid_pairs!(args..., GridPairType(s.PPNL, ncp[Int(CollidePoint_Point)], true, P, P))
