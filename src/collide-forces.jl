@@ -143,7 +143,12 @@ Force on P0 can be computed as -(fp1+fq0+fq1)
             (u, s*FP, -(1-t)*FP, -t*FP)
         end
         switchover_scale = calc_type(switchover_scale_unitless)*inv(L0)^2 # units of 1/length^2
-        switchover = tanh(Δ/sqrt(a*c)*switchover_scale)
+        # Smoothly switch from 0 for parallel lines to exactly 1 for x ≥ 3, where
+        # x = Δ/sqrt(a*c)*switchover_scale, with continuous first and second
+        # derivatives: switchover = 1 - (1 - x/3)^3 for x < 3.
+        w = relu(1 - Δ/sqrt(a*c)*switchover_scale*calc_type(1//3))
+        switchover = 1 - w^3
+        d_switchover = w^2 # derivative of switchover with respect to x
         #P0 is set as origin for now, subtract forces later to get final fp0
         ucl, fp1cl, fq0cl, fq1cl = u_f(mins,mint)
         us0, fp1s0, fq0s0, fq1s0 = u_f(s0,0)
@@ -180,12 +185,12 @@ Force on P0 can be computed as -(fp1+fq0+fq1)
         g = b/(p*q)
         uswitched = (ucl + -calc_type(1//2)*uother)
         fp1 = switchover*fp1cl + calc_type(1//2)*(1-switchover)*fp1other
-        d_switchover_dp1 = -switchover_scale*(1-switchover^2)*((q/p+b*g/a)*P - 2*g*Q)
+        d_switchover_dp1 = -switchover_scale*d_switchover*((q/p+b*g/a)*P - 2*g*Q)
         fp1 += d_switchover_dp1*uswitched
 
         fq0 = switchover*fq0cl + calc_type(1//2)*(1-switchover)*fq0other
         fq1 = switchover*fq1cl + calc_type(1//2)*(1-switchover)*fq1other
-        d_switchover_dq0 = switchover_scale*(1-switchover^2)*((p/q+b*g/c)*Q - 2*g*P)
+        d_switchover_dq0 = switchover_scale*d_switchover*((p/q+b*g/c)*Q - 2*g*P)
         d_switchover_dq1 = - d_switchover_dq0
         fq0 += d_switchover_dq0*uswitched
         fq1 += d_switchover_dq1*uswitched
