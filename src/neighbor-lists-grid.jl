@@ -405,8 +405,9 @@ function _grid_same_level_pairs!(levels, counts, cands, pos, policy, extra_cutof
                 local row = n_cells[1] * (cy + plane)
                 for cx in 0:n_cells[1]-1
                     local cell = row + cx
-                    local a_range = _grid_type_range(level, A, cell)
-                    local b_range = _grid_type_range(level, B, cell)
+                    local a_range = @inbounds _grid_type_range(level, A, cell)
+                    isempty(a_range) && continue
+                    local b_range = @inbounds _grid_type_range(level, B, cell)
                     isempty(b_range) && continue
                     # Cell coordinates in the lower bound lanes
                     local c = GridEntry((0x0000, 0x0000, 0x0000, cx % UInt16, cy % UInt16, cz % UInt16, 0x0000, 0x0000))
@@ -439,7 +440,7 @@ end
 # level and the entries of type `Y` in the cells it touches at the finer
 # level `k`. The pair is from `x` if `x_is_a`, or from the smaller index if
 # both are the same type.
-function _grid_check_finer!(cands, pos, policy, extra_cutoff, pair_type::GridPairType,
+@inline function _grid_check_finer!(cands, pos, policy, extra_cutoff, pair_type::GridPairType,
         level::GridLevel, k::UInt8, x_aabb, Y::Int, x_is_a::Bool,
     )
     local self = pair_type.self
@@ -457,10 +458,12 @@ function _grid_check_finer!(cands, pos, policy, extra_cutoff, pair_type::GridPai
             local row = n_cells[1] * (cy + plane)
             for cx in lo[1]:hi[1]
                 local cell = row + cx
+                local q_range = @inbounds _grid_type_range(level, Y, cell)
+                # Most cells at finer levels are empty
+                isempty(q_range) && continue
                 # Cell coordinates in the lower bound lanes
                 local c = GridEntry((0x0000, 0x0000, 0x0000, cx % UInt16, cy % UInt16, cz % UInt16, 0x0000, 0x0000))
                 local x_in_cell = _grid_lower_in_cell(x_lo, s, c)
-                local q_range = _grid_type_range(level, Y, cell)
                 _grid_make_room!(cands, length(q_range), pos, policy, extra_cutoff, pair_type)
                 local n = cands.n
                 for q in q_range
@@ -534,14 +537,18 @@ end
 # Return the smallest radius and the number of objects that pass `filter_object`.
 function _filtered_min_radius(policy, obj_type::CollideObjectTypes, radii, params)::Tuple{Float32, Int}
     local min_r = Inf32
+    local any_nan = false
     local n = 0
     for index in UInt32(1):UInt32(length(radii))
         local r = radii[index]
-        filter_object(policy, params[index], obj_type, index, r) || continue
-        min_r = min(min_r, r)
-        n += 1
+        local keep = filter_object(policy, params[index], obj_type, index, r)
+        # Branchless, and the fast min vectorizes. NaN is tracked separately
+        # since the fast min may drop it.
+        min_r = Base.FastMath.min_fast(min_r, ifelse(keep, r, Inf32))
+        any_nan |= keep & isnan(r)
+        n += keep
     end
-    (min_r, n)
+    (any_nan ? NaN32 : min_r, n)
 end
 
 # Return the number of cells `n` along each axis of a grid spanning `width`,
