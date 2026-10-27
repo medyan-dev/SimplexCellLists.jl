@@ -1,364 +1,175 @@
 """
-    nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge, policy::CollidePolicy, calc_type)::Nothing
+    nl_edge_force(policy::CollidePolicy, x::Simplex{N,T}, y::Simplex{M,T}, (d2, r, s, t), L::T, params)::Tuple{T, Simplex{N,T}, Simplex{M,T}}
 
-Add the collide force and energy of a single neighbor-list edge to `force_energy`.
+Return `(energy, fx, fy)`, the collide energy of one neighbor-list edge and
+the forces on the vertices of `x` and `y`.
 
-Methods dispatch on the index part types of `edge` and on `policy`, so a custom
-`CollidePolicy` with its own `PairParams` can define its own force laws.
+- `x` and `y` are the vertex positions of `edge.a` and `edge.b`, relative to
+  the first vertex of `x`, converted to the calculation type `T`. `x[1]` is
+  always `zero(Vec3{T})`, positive zero.
+- `(d2, r, s, t)` is `dist_sqr_r_s_t(x, y)`, see [`dist_sqr_r_s_t`](@ref).
+- `L` is `edge.L` converted to `T`, and `params` is `edge.params`.
+
+The hook is only called for edges in range, `d2 < L^2`.
+
+The kind of edge is given by `N` and `M`: 1 for a point, 2 for a line
+segment, 3 for a triangle.
+
+Methods dispatch on `policy`, so a custom `CollidePolicy` with its own
+`PairParams` can define its own force laws. Methods should be `@inline`,
+branch free, and do no memory access, so the forces of many edges can be
+vectorized.
 """
-function nl_edge_forces! end
+function nl_edge_force end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, PointIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
-    x1 = pos[edge.a.i]
-    x2 = pos[edge.b.i]
-    d = map(calc_type, x1 - x2)
-    d2cl = sum(abs2, d)
-    L0 = calc_type(edge.L)
-    if d2cl < L0^2
-        L = _sqrt_fast(d2cl)
-        k = calc_type(edge.params.k)
-        ΔL = L0 - L
-        E = k*calc_type(1//2)*ΔL^2
-        F = (k*ΔL*inv(L))*d
-        add_bead_force!(force_energy, edge.a.i, F)
-        add_bead_force!(force_energy, edge.b.i, -F)
-        add_energy!(force_energy, E)
-    end
-    nothing
+@inline function nl_edge_force(policy::DefaultCollidePolicy, x::Simplex{N, T}, y::Simplex{M, T}, (d2, r, s, t), L::T, params::DefaultPairParams) where {N, M, T}
+    k = T(params.k)
+    d = _sqrt_fast(d2)
+    ΔL = L - d
+    # The force on the closest point of `y`, and its negative on `x`, spread
+    # over the vertices by their barycentric weights.
+    F = scale3(k*ΔL*inv(d), r)
+    wx = SVector(one(T) - sum(s), s...)
+    wy = SVector(one(T) - sum(t), t...)
+    k*T(1//2)*ΔL^2, map(w -> scale3(-w, F), wx), map(w -> scale3(w, F), wy)
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
-    x1 = pos[edge.a.i]
-    y1 = pos[edge.b.i]
-    y2 = pos[edge.b.i + UInt32(1)]
-    r = map(calc_type, y2 - y1)
-    p = map(calc_type, x1 - y1)
-    t = clamp01nan(dot3(p, r)*inv(dot3(r, r)))
-    d = t*r - p
-    d2cl = sum(abs2, d)
-    L0 = calc_type(edge.L)
-    if d2cl < L0^2
-        L = _sqrt_fast(d2cl)
-        k = calc_type(edge.params.k)
-        ΔL = L0 - L
-        E = k*calc_type(1//2)*ΔL^2
-        F = (k*ΔL*inv(L))*d
-        add_bead_force!(force_energy, edge.a.i, -F)
-        add_bead_force!(force_energy, edge.b.i, (oneunit(t)-t)*F)
-        add_bead_force!(force_energy, edge.b.i + UInt32(1), t*F)
-        add_energy!(force_energy, E)
-    end
-    nothing
+# Energy, and forces on x[2], y[1] and y[2], without the `k` factor, of the
+# spring of rest length `L` between the points at `s` on `x` and `t` on `y`,
+# separated by `r`.
+@inline function _line_line_u_f(L::T, s::T, t::T, r) where T
+    d = norm_fast(r)
+    # A boundary critical point can be out of range, where the spring must
+    # not pull, and the closest point can be by rounding.
+    ΔL = relu(L - d)
+    F = scale3(ΔL*inv(d), r)
+    T(1//2)*ΔL^2, scale3(-s, F), scale3(one(T) - t, F), scale3(t, F)
 end
 
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
-    x1 = pos[edge.a.i]
-    y1 = pos[edge.b.i]
-    y2 = pos[edge.b.j]
-    r = map(calc_type, y2 - y1)
-    p = map(calc_type, x1 - y1)
-    t = clamp01nan(dot3(p, r)*inv(dot3(r, r)))
-    d = t*r - p
-    d2cl = sum(abs2, d)
-    L0 = calc_type(edge.L)
-    if d2cl < L0^2
-        L = _sqrt_fast(d2cl)
-        k = calc_type(edge.params.k)
-        ΔL = L0 - L
-        E = k*calc_type(1//2)*ΔL^2
-        F = (k*ΔL*inv(L))*d
-        add_bead_force!(force_energy, edge.a.i, -F)
-        add_bead_force!(force_energy, edge.b.i, (oneunit(t)-t)*F)
-        add_bead_force!(force_energy, edge.b.j, t*F)
-        add_energy!(force_energy, E)
-    end
-    nothing
-end
-
-"""
-Core helper function for line-line collide force calculation.
-Returns (do_force::Bool, u, fp1, fq0, fq1) where:
-- do_force: whether forces should be applied
-- u: energy (without k factor)
-- fp1: force on P1 (without k factor)
-- fq0: force on Q0 (without k factor)
-- fq1: force on Q1 (without k factor)
-Force on P0 can be computed as -(fp1+fq0+fq1)
-"""
-@inline function line_line_force_core(P0, P1, Q0, Q1, calc_type::T, switchover_scale_unitless, L0) where T
-    P = map(calc_type, P1-P0)
-    Q = map(calc_type, Q1-Q0)
-    P0mQ0 = map(calc_type, P0-Q0)
+# The closest point alone gives a discontinuous force between nearly parallel
+# line segments, so it is blended with the four boundary critical points.
+@inline function nl_edge_force(policy::DefaultCollidePolicy, x::LineSeg{T}, y::LineSeg{T}, (d2, r, s, t), L::T, params::DefaultPairParams) where T
+    P = x[2] - x[1]
+    Q = y[2] - y[1]
+    Q0mP0 = y[1] - x[1]
     a = dot3(P, P)
     b = dot3(P, Q)
     c = dot3(Q, Q)
-    d = dot3(P, P0mQ0)
-    e = dot3(Q, P0mQ0)
-    f = dot3(P0mQ0, P0mQ0)
-    Δ = a*c - b^2
-    #assuming both segments are not zero length
-    #critical points
-    s0 = clamp01nan(-d/a)
-    s1 = clamp01nan((b-d)/a)
-    t0 = clamp01nan(e/c)
-    t1 = clamp01nan((b+e)/c)
-    sbar = clamp01nan((b*e - c*d)/Δ)
-    tbar = clamp01nan((a*e - b*d)/Δ)
-    r(s,t) = a*s^2 - 2b*s*t + c*t^2 + 2d*s - 2e*t
-    mins = sbar
-    mint = tbar
-    minr = r(sbar,tbar)
-    if  r(s0,0) < minr
-        minr = r(s0,0)
-        mins = s0
-        mint = zero(a)
-    end
-    if  r(s1,1) < minr
-        minr = r(s1,1)
-        mins = s1
-        mint = one(a)
-    end
-    if  r(0,t0) < minr
-        minr = r(0,t0)
-        mins = zero(a)
-        mint = t0
-    end
-    if  r(1,t1) < minr
-        minr = r(1,t1)
-        mins = one(a)
-        mint = t1
-    end
-    d2cl = relu(f+minr)
-    if d2cl < L0^2
-        #return the energy and force on each point give s and t
-        # doesn't have the e.k factor
-        function u_f(s,t)
-            local Pcl = P0mQ0 + s*P
-            local Qcl = t*Q
-            local Rcl = Qcl - Pcl
-            local L = norm_fast(Rcl)
-            local ΔL = relu(L0 - L)
-            local u = calc_type(1//2)*ΔL^2
-            local FP = (-ΔL*inv(L))*Rcl
-            (u, s*FP, -(1-t)*FP, -t*FP)
+    d = dot3(P, Q0mP0)
+    e = dot3(Q, Q0mP0)
+    Δ = a*c - b*b
+    inva = inv(a)
+    invc = inv(c)
+    # The boundary critical points, as in `dist_sqr_r_s_t`
+    s0 = clamp01nan(d*inva)
+    s1 = clamp01nan((b+d)*inva)
+    t0 = clamp01nan(-e*invc)
+    t1 = clamp01nan((b-e)*invc)
+    ucl, fp1cl, fq0cl, fq1cl = _line_line_u_f(L, s[1], t[1], r)
+    # The separation between the points at `s` on `x` and `t` on `y` is
+    # `Q0mP0 + t*Q - s*P`.
+    us0, fp1s0, fq0s0, fq1s0 = _line_line_u_f(L, s0, zero(T), Q0mP0 - scale3(s0, P))
+    us1, fp1s1, fq0s1, fq1s1 = _line_line_u_f(L, s1, one(T), (y[2] - x[1]) - scale3(s1, P))
+    ut0, fp1t0, fq0t0, fq1t0 = _line_line_u_f(L, zero(T), t0, Q0mP0 + scale3(t0, Q))
+    ut1, fp1t1, fq0t1, fq1t1 = _line_line_u_f(L, one(T), t1, (Q0mP0 - P) + scale3(t1, Q))
+    uother = us0 + us1 + ut0 + ut1
+    fp1other = fp1s0 + fp1s1 + fp1t0 + fp1t1
+    fq0other = fq0s0 + fq0s1 + fq0t0 + fq0t1
+    fq1other = fq1s0 + fq1s1 + fq1t0 + fq1t1
+
+    switchover_scale = T(policy.switchover_scale_unitless)*inv(L)^2 # units of 1/length^2
+    # Smoothly switch from 0 for parallel lines to exactly 1 for x ≥ 3, where
+    # x = Δ/sqrt(a*c)*switchover_scale, with continuous first and second
+    # derivatives: switchover = 1 - (1 - x/3)^3 for x < 3.
+    w = relu(1 - Δ/_sqrt_fast(a*c)*switchover_scale*T(1//3))
+    switchover = 1 - w^3
+    d_switchover = w^2 # derivative of switchover with respect to x
+    u = switchover*ucl + T(1//2)*(1-switchover)*uother
+    p = _sqrt_fast(a)
+    q = _sqrt_fast(c)
+    g = b/(p*q)
+    uswitched = (ucl + -T(1//2)*uother)
+    fp1 = switchover*fp1cl + T(1//2)*(1-switchover)*fp1other
+    d_switchover_dp1 = -switchover_scale*d_switchover*((q/p+b*g/a)*P - 2*g*Q)
+    fp1 += d_switchover_dp1*uswitched
+
+    fq0 = switchover*fq0cl + T(1//2)*(1-switchover)*fq0other
+    fq1 = switchover*fq1cl + T(1//2)*(1-switchover)*fq1other
+    d_switchover_dq0 = switchover_scale*d_switchover*((p/q+b*g/c)*Q - 2*g*P)
+    d_switchover_dq1 = - d_switchover_dq0
+    fq0 += d_switchover_dq0*uswitched
+    fq1 += d_switchover_dq1*uswitched
+
+    k = T(params.k)
+    # The force on x[1] balances the others, by translation invariance.
+    k*u, SVector(-k*(fp1+fq0+fq1), k*fp1), SVector(k*fq0, k*fq1)
+end
+
+_vertex_idxs(x::PointIdxPart) = (x.i,)
+_vertex_idxs(x::CLineIdxPart) = (x.i, x.i + UInt32(1))
+_vertex_idxs(x::LineIdxPart) = (x.i, x.j)
+_vertex_idxs(x::TriangleIdxPart) = (x.i, x.j, x.k)
+
+# `x` relative to its own first vertex, which is exactly `zero(Vec3{T})`.
+@inline function _relative_x(::Type{T}, v::SVector{N}) where {T, N}
+    SVector{N, Vec3{T}}(ntuple(i -> i == 1 ? zero(Vec3{T}) : map(T, v[i] - v[1]), Val(N)))
+end
+
+"""
+    nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge, policy::CollidePolicy, calc_type::Type{T})::Nothing where T
+
+Add the collide force and energy of a single neighbor-list edge to
+`force_energy`, doing the calculations in the floating-point type `calc_type`.
+
+This is the scalar path of [`collide_forces!`](@ref) for one edge: the range
+check `dist_sqr < L^2`, then the force law [`nl_edge_force`](@ref). To change
+the force law, define `nl_edge_force` methods, not methods of this function.
+"""
+Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge, policy::CollidePolicy, calc_type::Type{T}) where T
+    xa = load_positions(pos, edge.a)
+    x = _relative_x(T, xa)
+    # Subtracted in the position type, then converted to `T`.
+    y = map(p -> map(T, p - xa[1]), load_positions(pos, edge.b))
+    drst = dist_sqr_r_s_t(x, y)
+    L = T(edge.L)
+    if drst[1] < L^2
+        E, fx, fy = nl_edge_force(policy, x, y, drst, L, edge.params)
+        for (n, idx) in enumerate(_vertex_idxs(edge.a))
+            add_bead_force!(force_energy, idx, fx[n])
         end
-        switchover_scale = calc_type(switchover_scale_unitless)*inv(L0)^2 # units of 1/length^2
-        # Smoothly switch from 0 for parallel lines to exactly 1 for x ≥ 3, where
-        # x = Δ/sqrt(a*c)*switchover_scale, with continuous first and second
-        # derivatives: switchover = 1 - (1 - x/3)^3 for x < 3.
-        w = relu(1 - Δ/sqrt(a*c)*switchover_scale*calc_type(1//3))
-        switchover = 1 - w^3
-        d_switchover = w^2 # derivative of switchover with respect to x
-        #P0 is set as origin for now, subtract forces later to get final fp0
-        ucl, fp1cl, fq0cl, fq1cl = u_f(mins,mint)
-        us0, fp1s0, fq0s0, fq1s0 = u_f(s0,0)
-        us1, fp1s1, fq0s1, fq1s1 = u_f(s1,1)
-        ut0, fp1t0, fq0t0, fq1t0 = u_f(0,t0)
-        ut1, fp1t1, fq0t1, fq1t1 = u_f(1,t1)
-        uother = +(
-            us0,
-            us1,
-            ut0,
-            ut1,
-        )
-        fp1other = +(
-            fp1s0,
-            fp1s1,
-            fp1t0,
-            fp1t1,
-        )
-        fq0other = +(
-            fq0s0,
-            fq0s1,
-            fq0t0,
-            fq0t1,
-        )
-        fq1other = +(
-            fq1s0,
-            fq1s1,
-            fq1t0,
-            fq1t1,
-        )
-        u = switchover*ucl + calc_type(1//2)*(1-switchover)*uother
-        p = sqrt(a)
-        q = sqrt(c)
-        g = b/(p*q)
-        uswitched = (ucl + -calc_type(1//2)*uother)
-        fp1 = switchover*fp1cl + calc_type(1//2)*(1-switchover)*fp1other
-        d_switchover_dp1 = -switchover_scale*d_switchover*((q/p+b*g/a)*P - 2*g*Q)
-        fp1 += d_switchover_dp1*uswitched
-
-        fq0 = switchover*fq0cl + calc_type(1//2)*(1-switchover)*fq0other
-        fq1 = switchover*fq1cl + calc_type(1//2)*(1-switchover)*fq1other
-        d_switchover_dq0 = switchover_scale*d_switchover*((p/q+b*g/c)*Q - 2*g*P)
-        d_switchover_dq1 = - d_switchover_dq0
-        fq0 += d_switchover_dq0*uswitched
-        fq1 += d_switchover_dq1*uswitched
-
-        return true, u, fp1, fq0, fq1
-    else
-        return false, zero(L0), zero(P), zero(P), zero(P)
-    end
-end
-
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, CLineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
-    P0 = pos[edge.a.i]
-    P1 = pos[edge.a.i + UInt32(1)]
-    Q0 = pos[edge.b.i]
-    Q1 = pos[edge.b.i + UInt32(1)]
-    L0 = calc_type(edge.L)
-    do_force, u, fp1, fq0, fq1 = line_line_force_core(P0, P1, Q0, Q1, calc_type, policy.switchover_scale_unitless, L0)
-    if do_force
-        ke = calc_type(edge.params.k)
-        add_bead_force!(force_energy, edge.a.i, -ke*(fp1+fq0+fq1))
-        add_bead_force!(force_energy, edge.a.i + UInt32(1), ke*fp1)
-
-        add_bead_force!(force_energy, edge.b.i, ke*fq0)
-        add_bead_force!(force_energy, edge.b.i + UInt32(1), ke*fq1)
-
-        add_energy!(force_energy, u*ke)
-    end
-    nothing
-end
-
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{CLineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
-    P0 = pos[edge.a.i]
-    P1 = pos[edge.a.i + UInt32(1)]
-    Q0 = pos[edge.b.i]
-    Q1 = pos[edge.b.j]
-    L0 = calc_type(edge.L)
-    do_force, u, fp1, fq0, fq1 = line_line_force_core(P0, P1, Q0, Q1, calc_type, policy.switchover_scale_unitless, L0)
-    if do_force
-        ke = calc_type(edge.params.k)
-        add_bead_force!(force_energy, edge.a.i, -ke*(fp1+fq0+fq1))
-        add_bead_force!(force_energy, edge.a.i + UInt32(1), ke*fp1)
-
-        add_bead_force!(force_energy, edge.b.i, ke*fq0)
-        add_bead_force!(force_energy, edge.b.j, ke*fq1)
-
-        add_energy!(force_energy, u*ke)
-    end
-    nothing
-end
-
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{LineIdxPart, LineIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
-    P0 = pos[edge.a.i]
-    P1 = pos[edge.a.j]
-    Q0 = pos[edge.b.i]
-    Q1 = pos[edge.b.j]
-    L0 = calc_type(edge.L)
-    do_force, u, fp1, fq0, fq1 = line_line_force_core(P0, P1, Q0, Q1, calc_type, policy.switchover_scale_unitless, L0)
-    if do_force
-        ke = calc_type(edge.params.k)
-        add_bead_force!(force_energy, edge.a.i, -ke*(fp1+fq0+fq1))
-        add_bead_force!(force_energy, edge.a.j, ke*fp1)
-
-        add_bead_force!(force_energy, edge.b.i, ke*fq0)
-        add_bead_force!(force_energy, edge.b.j, ke*fq1)
-
-        add_energy!(force_energy, u*ke)
-    end
-    nothing
-end
-
-#=
-Based on https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
-// David Eberly, Geometric Tools, Redmond WA 98052
-// Copyright (c) 1998-2022
-// Distributed under the Boost Software License, Version 1.0.
-// https://www.boost.org/LICENSE_1_0.txt
-// https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
-// Version: 6.0.2022.01.06
-=#
-Base.@propagate_inbounds function nl_edge_forces!(force_energy::ForceEnergy, pos, edge::NeighborListEdge{PointIdxPart, TriangleIdxPart, DefaultPairParams}, policy::DefaultCollidePolicy, calc_type::T) where T
-    P = pos[edge.a.i]
-    B = pos[edge.b.i]
-    E0 = map(calc_type, pos[edge.b.j] - B)
-    E1 = map(calc_type, pos[edge.b.k] - B)
-    BP = map(calc_type, B - P)
-    a = dot3(E0, E0)
-    b = dot3(E0, E1)
-    c = dot3(E1, E1)
-    d = dot3(E0, BP)
-    e = dot3(E1, BP)
-    f = dot3(BP, BP)
-    Δ = a*c - b^2
-    invΔ = inv(Δ)
-    sbar = clamp01nan((b*e - c*d)*invΔ)
-    tbar = clamp01nan((-a*e + b*d)*invΔ)
-
-    # this ensures sbar and tbar are in the domain
-    # if they are out of the domain, the min distance is on a boundary
-    outside = sbar+tbar > one(sbar)
-    sbar = ifelse(outside,zero(sbar),sbar)
-    tbar = ifelse(outside,zero(tbar),tbar)
-    s0 = clamp01nan(-d/a)
-    t0 = clamp01nan(-e/c)
-    sd = clamp01nan(-(b-c+d-e)/(a-2b+c))
-    td = one(sd) - sd
-    r(s,t) = a*s^2 + 2b*s*t + c*t^2 + 2d*s + 2e*t
-
-    mins = sbar
-    mint = tbar
-    minr = r(sbar,tbar)
-    if  r(s0,0) < minr
-        minr = r(s0,0)
-        mins = s0
-        mint = zero(a)
-    end
-    if  r(0,t0) < minr
-        minr = r(0,t0)
-        mins = zero(a)
-        mint = t0
-    end
-    if  r(sd,td) < minr
-        minr = r(sd,td)
-        mins = sd
-        mint = td
-    end
-    d2cl = relu(f+minr)
-    L0 = calc_type(edge.L)
-    if d2cl < L0^2
-        # dvec is the vector from P to closest point on triangle
-        dvec = BP + mins*E0 + mint*E1
-        L = _sqrt_fast(d2cl)
-        k = calc_type(edge.params.k)
-        ΔL = L0 - L
-        E = k*calc_type(1//2)*ΔL^2
-        F = (k*ΔL*inv(L))*dvec
-        add_bead_force!(force_energy, edge.a.i, -F)
-        # Forces on triangle vertices
-        # Closest point on triangle is B + mins*E0 + mint*E1 = (1-mins-mint)*B + mins*(B+E0) + mint*(B+E1)
-        # = (1-mins-mint)*y[1] + mins*y[2] + mint*y[3]
-        w0 = oneunit(mins) - mins - mint
-        add_bead_force!(force_energy, edge.b.i, w0*F)
-        add_bead_force!(force_energy, edge.b.j, mins*F)
-        add_bead_force!(force_energy, edge.b.k, mint*F)
+        for (n, idx) in enumerate(_vertex_idxs(edge.b))
+            add_bead_force!(force_energy, idx, fy[n])
+        end
         add_energy!(force_energy, E)
     end
     nothing
 end
 
-function nl_forces!(force_energy::ForceEnergy, pos, nl, policy::CollidePolicy, calc_type::T, chunk, nthreads) where T
+# The scalar reference path, one edge at a time: works for any `calc_type`.
+function nl_forces_scalar!(force_energy::ForceEnergy, pos, nl, policy::CollidePolicy, calc_type::Type{T}, chunk, nthreads) where T
     # Split 1:length(nl) into nthreads contiguous chunks with sizes differing
     # by at most one; chunks past the end are empty.
-    q, r = divrem(length(nl), nthreads)
-    start = (chunk - 1)*q + min(chunk - 1, r) + 1
-    stop = chunk*q + min(chunk, r)
+    q, rem = divrem(length(nl), nthreads)
+    start = (chunk - 1)*q + min(chunk - 1, rem) + 1
+    stop = chunk*q + min(chunk, rem)
     for i in start:stop
         nl_edge_forces!(force_energy, pos, nl[i], policy, calc_type)
     end
     nothing
 end
 
+function nl_forces!(force_energy::ForceEnergy, pos, nl, policy::CollidePolicy, calc_type::Type{T}, chunk, nthreads) where T
+    nl_forces_scalar!(force_energy, pos, nl, policy, calc_type, chunk, nthreads)
+end
+
 """
-    collide_forces!(force_energy::ForceEnergy, pos, s::NeighborLists, calc_type; chunk=1, nthreads=1)::Nothing
+    collide_forces!(force_energy::ForceEnergy, pos, s::NeighborLists, calc_type::Type{T}; chunk=1, nthreads=1)::Nothing where T
 
 Add the collide forces and energy of every neighbor-list edge in `s` to
 `force_energy`, doing the calculations in the floating-point type `calc_type`.
 
-Each edge's contribution is computed by [`nl_edge_forces!`](@ref), so a custom
-`CollidePolicy` can change the force laws.
+Each edge in range, with `dist_sqr < L^2`, gets its force and energy from
+[`nl_edge_force`](@ref), so a custom `CollidePolicy` can change the force laws.
 
 For multithreading, split the work into `nthreads` chunks: thread `t` calls
 `collide_forces!` with `chunk=t` and the same `nthreads`, accumulating into
@@ -366,7 +177,7 @@ its own `force_energy`, and the per-thread accumulators are merged afterwards
 with [`combine_force_energy!`](@ref). Every edge is visited exactly once
 across the chunks.
 """
-function collide_forces!(force_energy::ForceEnergy, pos, s::NeighborLists, calc_type::T; chunk=1, nthreads=1) where T
+function collide_forces!(force_energy::ForceEnergy, pos, s::NeighborLists, calc_type::Type{T}; chunk=1, nthreads=1) where T
     nl_forces!(force_energy, pos, s.PPNL, s.policy, calc_type, chunk, nthreads)
     nl_forces!(force_energy, pos, s.PCNL, s.policy, calc_type, chunk, nthreads)
     nl_forces!(force_energy, pos, s.PLNL, s.policy, calc_type, chunk, nthreads)

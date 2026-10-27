@@ -177,6 +177,29 @@ end
     end
 end
 
+@testset "Float32 deep overlap of large simplexes" begin
+    # The force laws use `d2` from `dist_sqr_r_s_t` as is, so it must stay
+    # accurate in `Float32` when the simplexes are much larger than their
+    # separation, here 0.01.
+    x = SA[1.0, 0.0, 0.0]
+    y = SA[0.0, 1.0, 0.0]
+    z = SA[0.0, 0.0, 1.0]
+    w = x/2 + sqrt(3)/2*y
+    for (positions, a, b) in (
+            ([-37x, 63x, 0.01z - 41w, 0.01z + 59w], LineIdxPart(1, 2), LineIdxPart(3, 4)),
+            ([0.01z + 3x + 2y, -23x - 7y, 31x - 9y, 2x + 27y], PointIdxPart(1), TriangleIdxPart(2, 3, 4)),
+        )
+        edge = NeighborListEdge(a, b, 6f0, DefaultPairParams(10f0))
+        fe32 = ForceEnergyFloat64(length(positions))
+        nl_edge_forces!(fe32, positions, edge, DefaultCollidePolicy(), Float32)
+        fe64 = ForceEnergyFloat64(length(positions))
+        nl_edge_forces!(fe64, positions, edge, DefaultCollidePolicy(), Float64)
+        @test all(f -> all(isfinite, f), get_force(fe32))
+        @test get_energy(fe32) ≈ get_energy(fe64) rtol=1e-4
+        @test flat_force(fe32) ≈ flat_force(fe64) rtol=1e-3
+    end
+end
+
 @testset "collide_forces! integration" begin
     policy = DefaultCollidePolicy()
     # 3×3×4 grid, spacing 0.4: with radius 0.3 overlaps are guaranteed, but
@@ -218,6 +241,12 @@ end
     end
     @test get_energy(fe_manual) == get_energy(fe)
     @test get_force(fe_manual) == get_force(fe)
+
+    # the scalar fallback works for other calc types
+    fe_big = DebugForceEnergy{BigFloat}(length(positions))
+    collide_forces!(fe_big, positions, nl, BigFloat)
+    @test get_energy(fe_big) ≈ get_energy(fe)
+    @test get_force(fe_big) ≈ get_force(fe)
 
     # the chunked path visits every edge exactly once
     for nthreads in (1, 2, 3, 7, 100)

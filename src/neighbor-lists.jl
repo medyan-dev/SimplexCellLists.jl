@@ -310,7 +310,7 @@ A single potentially-colliding pair of simplices in a [`NeighborLists`](@ref).
 - `a::A`: index part of the first simplex, one of `PointIdxPart`, `CLineIdxPart`, or `LineIdxPart`. Triangles never initiate an interaction, so `A` is never `TriangleIdxPart`.
 - `b::B`: index part of the second simplex, one of `PointIdxPart`, `CLineIdxPart`, `LineIdxPart`, or `TriangleIdxPart`.
 - `L::Float32`: the interaction distance for the pair, i.e. the sum of the two simplices' radii.
-- `params::PairParams`: the mixed pair parameters produced by the policy's `mix_params`, passed to `nl_edge_forces!`.
+- `params::PairParams`: the mixed pair parameters produced by the policy's `mix_params`, passed to `nl_edge_force`.
 """
 struct NeighborListEdge{A, B, PairParams}
     a::A # IdxPart

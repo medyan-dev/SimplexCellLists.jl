@@ -157,6 +157,7 @@ end
 include("collide-forces.jl")
 export collide_forces!
 public nl_edge_forces!
+public nl_edge_force
 
 # Precompile the collide forces for the default policy
 let NL = NeighborLists{DefaultCollidePolicy, DefaultPairParams}

@@ -41,7 +41,7 @@ Neighbor lists and collide forces are configured with a `CollidePolicy`.
 The policy decides which objects and pairs participate in the neighbor lists
 (`filter_object`, `filter_pair`), how per-object parameters combine into
 per-pair parameters (`mix_params`), and which force law applies to each edge
-(`nl_edge_forces!`).
+(`nl_edge_force`).
 
 `DefaultCollidePolicy` stores a stiffness and collision layer masks per
 object, and applies a soft repulsive potential `E = k/2 * (L - d)²` when two
@@ -79,5 +79,5 @@ reused across steps. `setup_neighbors_naive!` is a reference implementation of
 
 A custom policy subtypes `CollidePolicy{ObjectParams, PairParams}` with its
 own parameter types and methods for `filter_object`, `filter_pair`, and
-`mix_params`, and can define its own `nl_edge_forces!` methods to change the
+`mix_params`, and can define its own `nl_edge_force` methods to change the
 force law.
