@@ -22,242 +22,197 @@ function dist_sqr_r_s_t end
     dist_sqr(x::Simplex{N,T}, y::Simplex{M,T})::T
 
 Return the minimum squared distance between two simplexes.
+
+This is the `d²` of [`dist_sqr_r_s_t`](@ref), bit for bit.
 """
-function dist_sqr(x::Simplex{N, T}, y::Simplex{M, T}) where {T, N, M}
-    d2, r, s, t = @inline dist_sqr_r_s_t(y, x)
+@inline function dist_sqr(x::Simplex{N, T}, y::Simplex{M, T}) where {T, N, M}
+    # Inlining even the large methods lets LLVM drop the unused `r, s, t`.
+    d2, r, s, t = @inline dist_sqr_r_s_t(x, y)
     d2
 end
 
 # Dispatch N > M to N ≤ M
-function dist_sqr_r_s_t(x::Simplex{3, T}, y::Simplex{2, T}) where T
-    d2, r, s, t = @inline dist_sqr_r_s_t(y, x)
+@inline function dist_sqr_r_s_t(x::Simplex{3, T}, y::Simplex{2, T}) where T
+    d2, r, s, t = dist_sqr_r_s_t(y, x)
     d2, -r, t, s
 end
-function dist_sqr_r_s_t(x::Simplex{3, T}, y::Simplex{1, T}) where T
-    d2, r, s, t = @inline dist_sqr_r_s_t(y, x)
+@inline function dist_sqr_r_s_t(x::Simplex{3, T}, y::Simplex{1, T}) where T
+    d2, r, s, t = dist_sqr_r_s_t(y, x)
     d2, -r, t, s
 end
-function dist_sqr_r_s_t(x::Simplex{2, T}, y::Simplex{1, T}) where T
-    d2, r, s, t = @inline dist_sqr_r_s_t(y, x)
+@inline function dist_sqr_r_s_t(x::Simplex{2, T}, y::Simplex{1, T}) where T
+    d2, r, s, t = dist_sqr_r_s_t(y, x)
     d2, -r, t, s
-end
-function dist_sqr(x::Simplex{3, T}, y::Simplex{2, T}) where T
-    @inline dist_sqr(y, x)
-end
-function dist_sqr(x::Simplex{3, T}, y::Simplex{1, T}) where T
-    @inline dist_sqr(y, x)
-end
-function dist_sqr(x::Simplex{2, T}, y::Simplex{1, T}) where T
-    @inline dist_sqr(y, x)
 end
 
-# Branch free update of the running minimum `r` and its `s` and `t`.
-# Works on `SIMD.Vec` lanes. Ties keep the earlier minimum.
-@inline function _min_r_s_t(minr, mins, mint, r, s, t)
-    better = r < minr
-    SIMD.vifelse(better, r, minr), SIMD.vifelse(better, s, mins), SIMD.vifelse(better, t, mint)
+# Branch free selection of `(d2, r, s, t)` tuples, with `r` a `Vec3` and `s`
+# and `t` scalars. Works on `SIMD.Vec` lanes.
+@inline function _select_d2_r_s_t(c, (d2a, ra, sa, ta), (d2b, rb, sb, tb))
+    (
+        SIMD.vifelse(c, d2a, d2b),
+        SVector(SIMD.vifelse(c, ra[1], rb[1]), SIMD.vifelse(c, ra[2], rb[2]), SIMD.vifelse(c, ra[3], rb[3])),
+        SIMD.vifelse(c, sa, sb),
+        SIMD.vifelse(c, ta, tb),
+    )
 end
+
+# Branch free update of the running minimum `best` with `cand`.
+# Ties keep the earlier minimum.
+@inline _min_d2_r_s_t(best, cand) = _select_d2_r_s_t(cand[1] < best[1], cand, best)
 
 # The methods
 
-function dist_sqr_r_s_t(x::Point{T}, y::Point{T}) where T
+@inline function dist_sqr_r_s_t(x::Point{T}, y::Point{T}) where T
     d = y[1] - x[1]
     dot3(d, d), d, SVector{0,T}(), SVector{0,T}()
 end
 
-function dist_sqr_r_s_t(x::Point{T}, y::LineSeg{T}) where T
+@inline function dist_sqr_r_s_t(x::Point{T}, y::LineSeg{T}) where T
     r = y[2] - y[1]
-    p = x[1] - y[1]
-    t = clamp01nan(dot3(p, r)/dot3(r, r))
-    d = scale3(t, r) - p
+    # Written as `y - x[1]` so it folds to `y[1]` when `x[1]` is positive zero.
+    p = y[1] - x[1]
+    t = clamp01nan(-dot3(p, r)/dot3(r, r))
+    d = p + scale3(t, r)
     dot3(d, d), d, SVector{0,T}(), SVector{1,T}(t)
 end
 
 #=
-Based on https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
-But not fully optimized.
-// David Eberly, Geometric Tools, Redmond WA 98052
-// Copyright (c) 1998-2022
-// Distributed under the Boost Software License, Version 1.0.
-// https://www.boost.org/LICENSE_1_0.txt
-// https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
-// Version: 6.0.2022.01.06
+The closest point on the triangle is either the projection of the point onto
+the plane of the triangle, if that is inside the triangle, or on an edge.
+
+This avoids expanding the squared distance as a quadratic in the barycentric
+coordinates, which cancels: its absolute error scales with the squared size
+of the triangle, not with the distance. Here the distance inside is along the
+normal, and each edge candidate is `dot(r, r)` of its own separation `r`, so
+the error of the distance is about a rounding of the coordinates.
+
+`N` is from `cross3_accurate`, so it is exactly zero for an exactly
+degenerate triangle, which then always uses the edges. With `cross3`, `N` of
+a triangle with two equal edges is a rounding error, and the inside test can
+pass by mistake. Unlike `(b*e - c*d)/(a*c - b*b)`, the cross product form of
+the barycentric coordinates is also reliable for slivers.
+
+Each barycentric coordinate is computed from its own edge, with an error of
+about a rounding of `‖BP‖` times the length of that edge over `‖N‖`, so the
+inside test is off by about a rounding of `‖BP‖` in distance from that edge.
+Testing `sbar + tbar ≤ 1` instead puts the errors of `sbar` and `tbar`, which
+scale with the long edges, against the short edge `E2` of a needle, and in
+`Float32` a point 0.2 past the short edge of a needle 100 long could be
+judged inside.
+
+The projection onto the plane is from Kahan, "Computing Cross-Products and
+Rotations in 2- and 3-Dimensional Euclidean Spaces" (2016), §9, and the
+edges as in Ericson, "Real-Time Collision Detection" (2005), §5.1.5. See the
+`LineSeg`-`LineSeg` method for the references on `cross3_accurate`.
 =#
-function dist_sqr_r_s_t(x::Point{T}, y::Triangle{T}) where T
-    P = x[1]
+@inline function dist_sqr_r_s_t(x::Point{T}, y::Triangle{T}) where T
     B = y[1]
     E0 = y[2] - B
     E1 = y[3] - B
-    BP = B - P
-    a = dot3(E0, E0)
-    b = dot3(E0, E1)
-    c = dot3(E1, E1)
-    d = dot3(E0, BP)
-    e = dot3(E1, BP)
-    f = dot3(BP, BP)
-    Δ = a*c - b*b
+    # Written as `y - x[1]` so it folds to `B` when `x[1]` is positive zero.
+    BP = B - x[1]
+    N = cross3_accurate(E0, E1)
+    Δ = dot3(N, N)
     invΔ = inv(Δ)
-    sbar = clamp01nan((b*e - c*d)*invΔ)
-    tbar = clamp01nan((-a*e + b*d)*invΔ)
-    
-    # this ensures sbar and tbar are in the domain
-    # if they are out of the domain, the min distance is on a boundary
-    outside = sbar+tbar > one(sbar)
-    sbar = SIMD.vifelse(outside,zero(sbar),sbar)
-    tbar = SIMD.vifelse(outside,zero(tbar),tbar)
-    s0 = clamp01nan(-d/a)
-    t0 = clamp01nan(-e/c)
-    sd = clamp01nan(-(b-c+d-e)/(a-2b+c))
-    td = one(sd) - sd
-    @inline r(s,t) = a*(s*s) + 2b*s*t + c*(t*t) + 2d*s + 2e*t
-
-    mins = sbar
-    mint = tbar
-    minr = r(sbar,tbar)
-    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(s0,zero(a)), s0, zero(a))
-    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(zero(a),t0), zero(a), t0)
-    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(sd,td), sd, td)
-    d2cl = Base.FastMath.max_fast(zero(a),f+minr)
-    rcl = scale3(mins, E0) + scale3(mint, E1) + BP
-    d2cl, rcl, SVector{0,T}(), SVector{2,T}(mins, mint)
+    # The barycentric coordinates of the projection onto the plane, by
+    # Lagrange's identity, without the cancellation in `(b*e - c*d)/(a*c - b*b)`.
+    sbar = dot3(N, cross3(E1, BP))*invΔ
+    tbar = dot3(N, cross3(BP, E0))*invΔ
+    # The edge from `B + E0` to `B + E1`.
+    E2 = E1 - E0
+    BP2 = BP + E0
+    # The weight of `B`, `1 - sbar - tbar`, from its own edge. The sum
+    # `sbar + tbar` cancels when `E2` is much shorter than `E0` and `E1`.
+    wbar = dot3(N, cross3(BP2, E2))*invΔ
+    # False for NaN, from a degenerate triangle.
+    inside = (zero(T) ≤ sbar) & (zero(T) ≤ tbar) & (zero(T) ≤ wbar)
+    hN = dot3(BP, N)
+    rin = scale3(hN*invΔ, N)
+    d2in = hN*hN*invΔ
+    # The closest points on the edges from `B` along `E0` and `E1`, and from
+    # `B + E0` along `E2`.
+    u0 = clamp01nan(-dot3(E0, BP)/dot3(E0, E0))
+    r0 = BP + scale3(u0, E0)
+    best = (dot3(r0, r0), r0, u0, zero(T))
+    u1 = clamp01nan(-dot3(E1, BP)/dot3(E1, E1))
+    r1 = BP + scale3(u1, E1)
+    best = _min_d2_r_s_t(best, (dot3(r1, r1), r1, zero(T), u1))
+    u2 = clamp01nan(-dot3(BP2, E2)/dot3(E2, E2))
+    r2 = BP2 + scale3(u2, E2)
+    best = _min_d2_r_s_t(best, (dot3(r2, r2), r2, one(T) - u2, u2))
+    # Inside, `sbar` and `sbar + tbar` can round above one, so cap them to
+    # keep the weights a convex combination.
+    s_in = Base.FastMath.min_fast(sbar, one(T))
+    t_in = Base.FastMath.min_fast(tbar, one(T) - s_in)
+    d2, r, s, t = _select_d2_r_s_t(inside, (d2in, rin, s_in, t_in), best)
+    d2, r, SVector{0,T}(), SVector{2,T}(s, t)
 end
 
 #=
-Based on https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
-But not fully optimized.
-// David Eberly, Geometric Tools, Redmond WA 98052
-// Copyright (c) 1998-2022
-// Distributed under the Boost Software License, Version 1.0.
-// https://www.boost.org/LICENSE_1_0.txt
-// https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
-// Version: 6.0.2022.01.06
-=#
-@inline function dist_sqr(x::Point{T}, y::Triangle{T}) where T
-    P = x[1]
-    B = y[1]
-    E0 = y[3] - B
-    E1 = y[2] - B
-    BP = B - P
-    a = dot3(E0, E0)
-    b = dot3(E0, E1)
-    c = dot3(E1, E1)
-    d = dot3(E0, BP)
-    e = dot3(E1, BP)
-    f = dot3(BP, BP)
-    Δ = a*c - b*b
-    invΔ = inv(Δ)
-    sbar = clamp01nan((b*e - c*d)*invΔ)
-    tbar = clamp01nan((-a*e + b*d)*invΔ)
-    
-    # this ensures sbar and tbar are in the domain
-    # if they are out of the domain, the min distance is on a boundary
-    outside = sbar+tbar > one(sbar)
-    sbar = SIMD.vifelse(outside,zero(sbar),sbar)
-    tbar = SIMD.vifelse(outside,zero(tbar),tbar)
-    s0 = clamp01nan(-d/a)
-    t0 = clamp01nan(-e/c)
-    sd = clamp01nan(-(b-c+d-e)/(a-2b+c))
-    td = one(sd) - sd
-    @inline q(s,t) = a*(s*s) + 2b*s*t + c*(t*t) + 2d*s + 2e*t
-    
-    Base.FastMath.max_fast(zero(sd),f + Base.FastMath.min_fast(
-        q(s0,zero(a)),
-        q(zero(a),t0),
-        q(sd,td),
-        q(sbar,tbar),
-    ))
-end
+The line segments lie in parallel planes with normal `n = P×Q`. If their
+projections onto one of these planes cross, the closest points are at the
+crossing and the separation is along `n`. Otherwise the closest points are
+an end point of one line segment and its closest point on the other.
 
-#=
-Using the simple algorithm and some comments from
-https://www.geometrictools.com/Documentation/DistanceLine3Line3.pdf
-// David Eberly, Geometric Tools, Redmond WA 98052
-// Copyright (c) 1998-2022
-// Distributed under the Boost Software License, Version 1.0.
-// https://www.boost.org/LICENSE_1_0.txt
-// https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
-// Version: 6.0.2022.01.06
-Ignores the case of degenerate line segments.
+This is accurate for the same reason as the `Point`-`Triangle` method. `n` is
+from `cross3_accurate`: with `cross3`, the error of the distance between
+nearly parallel line segments grows like one over the angle between them.
+
+The nearest points of the lines through the line segments are from Kahan,
+"Computing Cross-Products and Rotations in 2- and 3-Dimensional Euclidean
+Spaces" (2016), §9: the separation is along `n = P×Q`, and the parameters
+are triple products over `|n|²` (Lagrange's identity), not the Gram
+determinant `a*c - b*b` of Lumelsky (1985) and Ericson, "Real-Time
+Collision Detection" (2005), §5.1.9, which cancels for nearly parallel line
+segments. `n` is computed with Kahan's algorithm for 2×2 determinants
+(Higham, "Accuracy and Stability of Numerical Algorithms", 2002, Problem
+2.27; bound 2u from Jeannerod, Louvet, Muller, Math. Comp. 82, 2013).
+For a different robust method see Eberly, "Robust Computation of Distance
+Between Line Segments" (Geometric Tools, 2018, revised 2023).
 =#
-function dist_sqr_r_s_t(x::LineSeg{T}, y::LineSeg{T}) where T
+@inline function dist_sqr_r_s_t(x::LineSeg{T}, y::LineSeg{T}) where T
     P0 = x[1]
-    P1 = x[2]
     Q0 = y[1]
-    Q1 = y[2]
-    P = P1-P0
-    Q = Q1-Q0
-    P0mQ0 = P0 - Q0
+    P = x[2] - P0
+    Q = y[2] - Q0
+    # Written as `y - x[1]` so it folds to `Q0` when `x[1]` is positive zero.
+    Q0mP0 = Q0 - P0
     a = dot3(P, P)
     b = dot3(P, Q)
     c = dot3(Q, Q)
-    d = dot3(P, P0mQ0)
-    e = dot3(Q, P0mQ0)
-    f = dot3(P0mQ0, P0mQ0)
-    Δ = a*c - b*b
-    #assuming both segments are not zero length
-    #critical points
-    s0 = clamp01nan(-d/a)
-    s1 = clamp01nan((b-d)/a)
-    t0 = clamp01nan(e/c)
-    t1 = clamp01nan((b+e)/c)
-    sbar = clamp01nan((b*e - c*d)/Δ)
-    tbar = clamp01nan((a*e - b*d)/Δ)
-    @inline r(s,t) = a*(s*s) - 2b*s*t + c*(t*t) + 2d*s - 2e*t
-    mins = sbar
-    mint = tbar
-    minr = r(sbar,tbar)
-    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(s0,zero(a)), s0, zero(a))
-    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(s1,one(a)), s1, one(a))
-    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(zero(a),t0), zero(a), t0)
-    minr, mins, mint = _min_r_s_t(minr, mins, mint, r(one(a),t1), one(a), t1)
-    d2cl = Base.FastMath.max_fast(zero(a),f+minr)
-    rcl = (scale3(mint, Q) - scale3(mins, P)) - P0mQ0
-    d2cl, rcl, SVector{1,T}(mins), SVector{1,T}(mint)
-end
-
-#=
-Using the simple algorithm and some comments from
-https://www.geometrictools.com/Documentation/DistanceLine3Line3.pdf
-// David Eberly, Geometric Tools, Redmond WA 98052
-// Copyright (c) 1998-2022
-// Distributed under the Boost Software License, Version 1.0.
-// https://www.boost.org/LICENSE_1_0.txt
-// https://www.geometrictools.com/License/Boost/LICENSE_1_0.txt
-// Version: 6.0.2022.01.06
-Ignores the case of degenerate line segments.
-=#
-@inline function dist_sqr(x::LineSeg{T}, y::LineSeg{T}) where T
-    P0 = x[1]
-    P1 = x[2]
-    Q0 = y[1]
-    Q1 = y[2]
-    P = P1-P0
-    Q = Q1-Q0
-    P0mQ0 = P0 - Q0
-    a = dot3(P, P)
-    b = dot3(P, Q)
-    c = dot3(Q, Q)
-    d = dot3(P, P0mQ0)
-    e = dot3(Q, P0mQ0)
-    f = dot3(P0mQ0, P0mQ0)
-    Δ = a*c - b*b
+    d = dot3(P, Q0mP0)
+    e = dot3(Q, Q0mP0)
+    n = cross3_accurate(P, Q)
+    Δ = dot3(n, n)
     invΔ = inv(Δ)
-    #assuming both segments are not zero length
-    #critical points
-    s0 = clamp01nan(-d/a)
-    s1 = clamp01nan((b-d)/a)
-    t0 = clamp01nan(e/c)
-    t1 = clamp01nan((b+e)/c)
-    sbar = clamp01nan((b*e - c*d)*invΔ)
-    tbar = clamp01nan((a*e - b*d)*invΔ)
-    @inline r(s,t) = a*(s*s) - 2b*s*t + c*(t*t) + 2d*s - 2e*t
-    Base.FastMath.max_fast(zero(s0),f+Base.FastMath.min_fast(
-        r(s0,zero(a)),
-        r(s1,one(a)),
-        r(zero(a),t0),
-        r(one(a),t1),
-        r(sbar,tbar),
-    ))
+    # The closest points of the lines through the line segments, by
+    # Lagrange's identity, without the cancellation in `a*c - b*b`.
+    sbar = dot3(n, cross3(Q0mP0, Q))*invΔ
+    tbar = dot3(n, cross3(Q0mP0, P))*invΔ
+    # False for NaN, from parallel or zero length line segments.
+    inside = (zero(T) ≤ sbar) & (sbar ≤ one(T)) & (zero(T) ≤ tbar) & (tbar ≤ one(T))
+    hn = dot3(Q0mP0, n)
+    rin = scale3(hn*invΔ, n)
+    d2in = hn*hn*invΔ
+    inva = inv(a)
+    invc = inv(c)
+    # The closest points on `x` of the end points of `y`, and on `y` of the
+    # end points of `x`. The separation between the points at `s` on `x` and
+    # `t` on `y` is `Q0mP0 + t*Q - s*P`.
+    s0 = clamp01nan(d*inva)
+    s1 = clamp01nan((b+d)*inva)
+    t0 = clamp01nan(-e*invc)
+    t1 = clamp01nan((b-e)*invc)
+    rs0 = Q0mP0 - scale3(s0, P)
+    best = (dot3(rs0, rs0), rs0, s0, zero(T))
+    rs1 = (Q0mP0 + Q) - scale3(s1, P)
+    best = _min_d2_r_s_t(best, (dot3(rs1, rs1), rs1, s1, one(T)))
+    rt0 = Q0mP0 + scale3(t0, Q)
+    best = _min_d2_r_s_t(best, (dot3(rt0, rt0), rt0, zero(T), t0))
+    rt1 = (Q0mP0 - P) + scale3(t1, Q)
+    best = _min_d2_r_s_t(best, (dot3(rt1, rt1), rt1, one(T), t1))
+    d2, r, s, t = _select_d2_r_s_t(inside, (d2in, rin, sbar, tbar), best)
+    d2, r, SVector{1,T}(s), SVector{1,T}(t)
 end
 
 #=
@@ -360,38 +315,10 @@ function dist_sqr_r_s_t(x::LineSeg{T}, y::Triangle{T}) where T
     end
 end
 
-function dist_sqr(x::LineSeg{T}, y::Triangle{T})::T where T
-    fzero = zero(T)
-    o = x[1]
-    d = x[2] - x[1]
-    a = y[1]
-    b = y[2]
-    c = y[3]
-    result = moller_trumbore_intersect(o, d, a, b, c)
-    if result.intersect == true
-        fzero
-    else
-        # no intersection or seg and triangle are parallel.
-        # min distance is on an edge of the triangle.
-        dab = dist_sqr(x,SA[a,b])
-        dbc = dist_sqr(x,SA[b,c])
-        dca = dist_sqr(x,SA[c,a])
-        dx1y = dist_sqr(SA[x[1],],y)
-        dx2y = dist_sqr(SA[x[2],],y)
-        Base.FastMath.min_fast(
-            dab,
-            dbc,
-            dca,
-            dx1y,
-            dx2y,
-        )
-    end
-end
-
 function dist_sqr_r_s_t(x::Triangle{T}, y::Triangle{T}) where T
     fzero = zero(T)
     fone = one(T)
-    d2, minr, _s, mint = dist_sqr_r_s_t(SA[x[1],x[2]], y)
+    d2, minr, _s, mint = @inline dist_sqr_r_s_t(SA[x[1],x[2]], y)
     _s_all = SA[fzero, _s[1], fone - _s[1]]
     mins = SA[_s_all[2], _s_all[1]]
     iszero(d2) && return d2, minr, mins, mint
@@ -399,7 +326,7 @@ function dist_sqr_r_s_t(x::Triangle{T}, y::Triangle{T}) where T
     bi = 3
     ci = 1
     for i in 2:3
-        this_d2, _r, _s, _t = dist_sqr_r_s_t(SA[x[ai],x[bi]], y)
+        this_d2, _r, _s, _t = @inline dist_sqr_r_s_t(SA[x[ai],x[bi]], y)
         if this_d2 < d2
             d2 = this_d2
             minr = _r
@@ -411,7 +338,7 @@ function dist_sqr_r_s_t(x::Triangle{T}, y::Triangle{T}) where T
         ai, bi, ci = bi, ci, ai
     end
     for i in 1:3
-        this_d2, _r, _s, _t = dist_sqr_r_s_t(SA[y[ai],y[bi]], x)
+        this_d2, _r, _s, _t = @inline dist_sqr_r_s_t(SA[y[ai],y[bi]], x)
         if this_d2 < d2
             d2 = this_d2
             minr = -_r
@@ -423,25 +350,4 @@ function dist_sqr_r_s_t(x::Triangle{T}, y::Triangle{T}) where T
         ai, bi, ci = bi, ci, ai
     end
     return d2, minr, mins, mint
-end
-
-function dist_sqr(x::Triangle{T}, y::Triangle{T}) where T
-    d2 = dist_sqr(SA[x[1],x[2]], y)
-    iszero(d2) && return d2
-    ai = 2
-    bi = 3
-    ci = 1
-    for i in 2:3
-        this_d2 = dist_sqr(SA[x[ai],x[bi]], y)
-        d2 = Base.FastMath.min_fast(d2, this_d2)
-        iszero(d2) && return d2
-        ai, bi, ci = bi, ci, ai
-    end
-    for i in 1:3
-        this_d2 = dist_sqr(SA[y[ai],y[bi]], x)
-        d2 = Base.FastMath.min_fast(d2, this_d2)
-        iszero(d2) && return d2
-        ai, bi, ci = bi, ci, ai
-    end
-    return d2
 end

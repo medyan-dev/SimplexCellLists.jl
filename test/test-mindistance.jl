@@ -33,17 +33,19 @@ end
 
 Random.seed!(1234)
 
-function distance_tests(as, bs)
+function distance_tests(as, bs; check_contact_points=true)
     for i in eachindex(as, bs)
         local a = as[i]
         local b = bs[i]
         local d2, r, s, t = dist_sqr_r_s_t(a, b)
         @test refDist2(a, b) ≈ d2 atol = 1E-10 rtol = 1E-11
-        @test d2 ≈ dist_sqr(a, b) atol = 1E-10 rtol = 1E-11
+        @test d2 === dist_sqr(a, b)
         @test r ⋅ r ≈ d2 atol = 1E-10 rtol = 1E-11
         local s_all = [one(eltype(s)) - sum(s); s;]
         local t_all = [one(eltype(t)) - sum(t); t;]
-        @test norm(r - (sum(b .* t_all) - sum(a .* s_all))) ≤ 1E-12
+        if check_contact_points || !iszero(d2)
+            @test norm(r - (sum(b .* t_all) - sum(a .* s_all))) ≤ 1E-12
+        end
         @test all(≥(0), s)
         @test all(≥(0), t)
         @test sum(s) ≤ 1
@@ -56,6 +58,29 @@ end
     as = rand(SVector{N,SVector{3,Float64}},trials)
     bs = rand(SVector{M,SVector{3,Float64}},trials)
     distance_tests(as, bs)
+end
+
+# Vertices drawn from a small pool, so simplexes share vertices and are often
+# degenerate: zero length line segments, triangles with repeated vertices.
+@testset "distance with shared vertices $N to $M" for N in 1:3, M in 1:3
+    trials = 300
+    pools = [rand(SVector{3,Float64}, 4) for _ in 1:trials]
+    as = [SVector{N}(ntuple(_ -> rand(pool), N)) for pool in pools]
+    bs = [SVector{M}(ntuple(_ -> rand(pool), M)) for pool in pools]
+    # `moller_trumbore_intersect` reports line segments in the plane of a
+    # triangle, such as its edges, as intersecting, with arbitrary `s` and `t`.
+    distance_tests(as, bs; check_contact_points = min(N, M) == 1 || max(N, M) < 3)
+end
+
+@testset "Float32 distance with shared vertices $N to $M" for N in 1:3, M in 1:3
+    for trial in 1:3000
+        box = 50 + 100rand()
+        pool = [SVector{3, Float32}(rand(3) .* box) for _ in 1:6]
+        a = SVector{N}(ntuple(_ -> rand(pool), N))
+        b = SVector{M}(ntuple(_ -> rand(pool), M))
+        ref = sqrt(dist_sqr(map(p -> Float64.(p), a), map(p -> Float64.(p), b)))
+        @test abs(sqrt(dist_sqr(a, b)) - ref) ≤ 4*eps(Float32)*box
+    end
 end
 
 @testset "line to triangle edge case" begin
@@ -74,6 +99,63 @@ end
     # See https://github.com/oxfordcontrol/Clarabel.jl/issues/103
     # This issue was resolved in https://github.com/oxfordcontrol/Clarabel.jl/pull/114
     @test ref_d2min ≈ d2min atol = 1E-11 rtol = 1E-11
+end
+
+# Simplexes about 100 across, 0.01 apart. Expanding the squared distance, as
+# Float64 does, gives a Float32 `d2` that is far off or zero here, and for
+# nearly parallel line segments `a*c - b*b` cancels and moves the closest point.
+@testset "Float32 large simplexes close together $name" for (name, a, b) in (
+        ("point-triangle",
+            SA[SA[3f0, 2f0, 0.01f0]],
+            SA[SA[-23f0, -7f0, 0f0], SA[31f0, -9f0, 0f0], SA[2f0, 27f0, 0f0]]),
+        ("line-line crossing",
+            SA[SA[-37f0, 0f0, 0f0], SA[63f0, 0f0, 0f0]],
+            SA[SA[-20.5f0, -35.507042f0, 0.01f0], SA[29.5f0, 51.0955f0, 0.01f0]]),
+        ("line-line nearly parallel",
+            SA[SA[-50f0, 0f0, 0f0], SA[50f0, 0f0, 0f0]],
+            SA[SA[-30f0, -0.1f0, 0.01f0], SA[70f0, 0.1f0, 0.01f0]]),
+        ("line-line nearly parallel closest point",
+            SA[SA[-50f0, 0f0, 0f0], SA[50f0, 0f0, 0f0]],
+            SA[SA[-32.51f0, -0.17f0, 0.01f0], SA[67.49f0, 0.17f0, 0.01f0]]),
+        ("line-triangle",
+            SA[SA[-40f0, 3f0, 0.01f0], SA[60f0, -2f0, 0.02f0]],
+            SA[SA[-23f0, -7f0, 0f0], SA[31f0, -9f0, 0f0], SA[2f0, 27f0, 0f0]]),
+        ("triangle-triangle",
+            SA[SA[-20f0, -5f0, 0.01f0], SA[25f0, -6f0, 0.02f0], SA[0f0, 30f0, 0.015f0]],
+            SA[SA[-23f0, -7f0, 0f0], SA[31f0, -9f0, 0f0], SA[2f0, 27f0, 0f0]]),
+    )
+    for (x, y) in ((a, b), (b, a))
+        # Float64 of the same coordinates, which is accurate here.
+        ref = sqrt(dist_sqr(map(p -> Float64.(p), x), map(p -> Float64.(p), y)))
+        @test 0.0099 < ref < 0.013
+        d2, r, s, t = dist_sqr_r_s_t(x, y)
+        @test sqrt(d2) ≈ ref rtol = 1E-5
+        @test norm(r) ≈ ref rtol = 1E-5
+        local s_all = [one(eltype(s)) - sum(s); s;]
+        local t_all = [one(eltype(t)) - sum(t); t;]
+        @test norm(r - (sum(y .* t_all) - sum(x .* s_all))) ≤ 1E-4
+    end
+end
+
+# A needle triangle 100 long with a short edge 0.001 long, and a point 0.01
+# above its plane that projects 0.2 past the short edge. Testing
+# `sbar + tbar ≤ 1` judged it inside in `Float32`, giving a distance of 0.01.
+@testset "Float32 point past the short edge of a needle" begin
+    Random.seed!(5)
+    for trial in 1:3000
+        n = normalize(randn(3))
+        e1 = normalize(cross(n, randn(3)))
+        e2 = cross(n, e1)
+        a = 100randn(3)
+        b = a .+ 100e1
+        c = b .+ 0.001e2
+        p = b .+ 0.001rand()*e2 .+ 0.2rand()*e1 .+ 0.01n
+        x = SA[SVector{3, Float32}(p)]
+        y = SA[SVector{3, Float32}(a), SVector{3, Float32}(b), SVector{3, Float32}(c)]
+        ref = sqrt(dist_sqr(map(v -> Float64.(v), x), map(v -> Float64.(v), y)))
+        @test abs(sqrt(dist_sqr(x, y)) - ref) ≤ 16*eps(Float32)*200
+        @test abs(sqrt(dist_sqr(y, x)) - ref) ≤ 16*eps(Float32)*200
+    end
 end
 
 # Return `W` simplices as one simplex with a lane per simplex.
