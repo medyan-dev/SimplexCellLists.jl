@@ -158,6 +158,98 @@ end
     end
 end
 
+# Worst-case accuracy points ported from error-analysis/ledger.jl. Each case
+# pins one branch domain (or branch boundary) of a distance kernel at the
+# ledger's sharpest known input, with the ledger's first-order claim
+# |√d̂² - d| ≤ u·bound(exact sizes), u = eps(T)/2, evaluated at the point and
+# rounded up ~1.3x as margin for how the sizes drift under the noise below.
+# Each point is tested as given, then with Gaussian coordinate noise of a few
+# ulps: enough to scramble every rounding, and at the boundary points to make
+# the branch actually flip (their tolerance is the traced all-domain bound,
+# which includes the branch jump terms).
+const ledger_cases = [
+    # point-point: 5u/2·d, attained when one coordinate carries the separation.
+    ("point-point, one coordinate separation", 7.0,
+        ((-1.0, 0.03, -0.02),), ((1.0, 0.06, 0.03),)),
+    ("point-point, balanced coordinates", 11.0,
+        ((-0.95, -1.0, 0.9),), ((0.9, 0.85, -1.0),)),
+    # point-line: t clamped to 0 is exactly point-point (5u/2·d); the interior
+    # arm has the traced bound u(9‖p‖+3‖r‖+3/2·d); t clamped to 1 computes
+    # fl(p+r), u(‖p‖+‖r‖+5/2·d), tight when p+r cancels; the t* = 0 and t* = 1
+    # boundary points have exactly zero conditions built from cancelling
+    # order-1 products, so rounding picks either arm.
+    ("point-line, t clamped to 0", 7.0,
+        ((1.0, 0.12, -0.03),), ((-1.0, 0.0, 0.0), (-1.0, -1.0, 0.0))),
+    ("point-line, interior", 38.0,
+        ((1.0, 0.0, 0.05),), ((-1.0, 1.0, 0.0), (-1.0, -1.0, 0.0))),
+    ("point-line, interior, aspect 10", 29.0,
+        ((1.0, 0.0, 0.0),), ((-1.0, 0.1, 0.02), (-1.0, -0.1, 0.02))),
+    ("point-line, t clamped to 1, p + r cancels", 8.0,
+        ((1.0, 1.0, 0.04),), ((-1.0, -1.0, 0.0), (0.98, 0.98, 0.0))),
+    ("point-line, boundary t* = 0", 35.0,
+        ((1.0, 1.0, 0.0),), ((-1.0, 0.0, 0.0), (-0.5, -1.0, 0.0))),
+    ("point-line, boundary t* = 1", 26.0,
+        ((0.5, 0.5, 0.0),), ((-1.0, 1.0, 0.0), (0.0, 0.0, 0.0))),
+    # point-triangle: the face arm claim is u(6‖BP‖+‖E0‖+‖E1‖+8d); the tilted
+    # triangle makes N generic, so the terms of hN = dot3(BP, N) are order 0.5
+    # and cancel — with a z = 0 triangle (as in the testsets above) hN is a
+    # single product and this error path is never exercised. Edges and
+    # vertices reuse the point-line rows on (BP, E) with rounded-sum charges.
+    ("point-triangle, face of a tilted triangle", 17.0,
+        ((-0.01, 0.01, 0.29),), ((-0.9, -0.6, 0.2), (0.8, -0.2, -0.3), (-0.2, 0.9, 0.1))),
+    ("point-triangle, near face of a tilted triangle, hN cancels", 13.0,
+        ((-0.09, 0.03, 0.02),), ((-0.9, -0.6, 0.2), (0.8, -0.2, -0.3), (-0.2, 0.9, 0.1))),
+    ("point-triangle, edge 0 interior", 23.0,
+        ((0.2, -0.9, 0.4),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
+    ("point-triangle, edge 2 interior", 24.0,
+        ((0.56, 0.59, 0.3),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
+    ("point-triangle, vertex a", 1.7,
+        ((-1.0, -0.95, 0.35),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
+    ("point-triangle, vertex b", 6.5,
+        ((1.0, -0.45, 0.3),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
+    # x over the midpoint of edge 0: the tbar numerator of the inside test is
+    # exactly zero, so rounding decides face vs edge.
+    ("point-triangle, inside-test boundary", 164.0,
+        ((-0.05, -0.4, 0.6),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
+    # x exactly on the u0 = 1 plane through b: edge 0 vs vertex b flips.
+    ("point-triangle, clamp boundary at vertex b", 192.0,
+        ((0.88, -0.54, 0.3),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
+    # line-line: the crossing arm claim is u(6‖W‖+‖P‖+‖Q‖+8d) with no 1/sinθ;
+    # the near parallel point (sinθ ≈ 0.008, where the Gram form a*c - b*b
+    # loses ~125x) must meet the same bound as the generic crossing. Edge and
+    # corner rows reuse the point-line rows on (W, P), (W, Q), etc.
+    ("line-line, generic crossing", 17.0,
+        ((-1.0, -0.2, 0.0), (1.0, 0.2, 0.0)), ((-0.3, -1.0, 0.25), (0.3, 1.0, 0.25))),
+    ("line-line, nearly parallel crossing", 8.0,
+        ((-1.0, -0.004, 0.0), (1.0, 0.004, 0.0)), ((-1.0, 0.004, 0.15), (1.0, -0.004, 0.15))),
+    ("line-line, s interior, t = 0", 25.0,
+        ((-1.0, -0.2, 0.0), (1.0, 0.2, 0.0)), ((0.1, 0.3, 0.3), (0.9, 0.9, 0.5))),
+    ("line-line, s = 0, t interior", 10.5,
+        ((-0.4, -0.3, 0.0), (0.56, 0.42, 0.0)), ((-0.31, -0.67, 0.25), (-0.73, -0.11, 0.25))),
+    ("line-line, corner (0,0)", 2.2,
+        ((-0.4, -0.3, 0.0), (0.56, 0.42, 0.0)), ((-0.7, -0.8, 0.3), (-1.0, -0.9, 0.5))),
+    # Q crosses exactly over P0: the sbar numerator of the inside test is zero.
+    ("line-line, inside-test boundary", 66.0,
+        ((-0.8, -0.6, 0.0), (0.8, 0.6, 0.0)), ((-0.68, -0.76, 0.25), (-0.92, -0.44, 0.25))),
+    # (Q0 - P0) ⊥ Q exactly: the t* = 0 clamp boundary in the s* = 0 region.
+    ("line-line, clamp boundary at corner (0,0)", 53.0,
+        ((-0.4, -0.3, 0.0), (0.56, 0.42, 0.0)), ((-0.52, -0.39, 0.25), (-0.82, 0.01, 0.25))),
+]
+
+@testset "ledger worst-case point: $name" for (name, tolu, xt, yt) in ledger_cases
+    rng = Random.Xoshiro(2026)
+    for T in (Float32, Float64)
+        tol = tolu*eps(T)/2
+        for σ in (0, 8, 64, 1024) .* eps(T), _ in 1:(iszero(σ) ? 1 : 100)
+            x = SVector(map(v -> SVector{3, T}(v .+ σ .* randn(rng, 3)), xt))
+            y = SVector(map(v -> SVector{3, T}(v .+ σ .* randn(rng, 3)), yt))
+            ref = sqrt(dist_sqr(map(v -> big.(v), x), map(v -> big.(v), y)))
+            @test abs(sqrt(dist_sqr(x, y)) - ref) ≤ tol
+            @test abs(sqrt(dist_sqr(y, x)) - ref) ≤ tol
+        end
+    end
+end
+
 # Return `W` simplices as one simplex with a lane per simplex.
 function simplex_lanes(xs::NTuple{W, SVector{N, SVector{3, T}}}) where {W, N, T}
     SVector{N}(ntuple(Val(N)) do v

@@ -12,7 +12,6 @@ using .ErrorBounds: DEFS
 
 setprecision(BigFloat, 512)
 
-norm_sym(n) = SPoly(Sym(n, 0))
 ratio_sym(a, b) = SPoly(Sym(a, 0)) * SPoly(Sym(b, 0), -1)
 
 const KERNELS = (
@@ -120,6 +119,13 @@ function inplane(n)
 end
 
 const GENS = (
+    point_point = (
+        "random [0,100]" => T -> ((vec3(T, 100rand(3)),), (vec3(T, 100rand(3)),)),
+        "0.01 apart, 1e4 from the origin" => T -> begin
+            c = 1e4randdir()
+            ((vec3(T, c),), (vec3(T, c .+ 0.01randdir()),))
+        end,
+    ),
     point_line = (
         "random [0,100]" => T -> ((vec3(T, 100rand(3)),), (vec3(T, 100rand(3)), vec3(T, 100rand(3)))),
         "point on the segment" => T -> begin
@@ -184,6 +190,7 @@ const GENS = (
 )
 
 Random.seed!(4)
+report("point-point", KERNELS.point_point, GENS.point_point)
 report("point-line", KERNELS.point_line, GENS.point_line)
 report("point-triangle", KERNELS.point_triangle, GENS.point_triangle)
 report("line-line", KERNELS.line_line, GENS.line_line)

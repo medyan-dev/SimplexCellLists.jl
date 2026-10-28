@@ -127,8 +127,11 @@ edges as in Ericson, "Real-Time Collision Detection" (2005), §5.1.5. See the
     # False for NaN, from a degenerate triangle.
     inside = (zero(T) ≤ sbar) & (zero(T) ≤ tbar) & (zero(T) ≤ wbar)
     hN = dot3(BP, N)
-    rin = scale3(hN*invΔ, N)
-    d2in = hN*hN*invΔ
+    # `hN*invΔ` first: `hN ≈ d*‖N‖` can be near the square root of floatmax
+    # when `hN*hN` would overflow, while `hN*invΔ ≈ d/‖N‖` stays in range.
+    hNinvΔ = hN*invΔ
+    rin = scale3(hNinvΔ, N)
+    d2in = hNinvΔ*hN
     # The closest points on the edges from `B` along `E0` and `E1`, and from
     # `B + E0` along `E2`.
     u0 = clamp01nan(-dot3(E0, BP)/dot3(E0, E0))
@@ -192,8 +195,11 @@ Between Line Segments" (Geometric Tools, 2018, revised 2023).
     # False for NaN, from parallel or zero length line segments.
     inside = (zero(T) ≤ sbar) & (sbar ≤ one(T)) & (zero(T) ≤ tbar) & (tbar ≤ one(T))
     hn = dot3(Q0mP0, n)
-    rin = scale3(hn*invΔ, n)
-    d2in = hn*hn*invΔ
+    # `hn*invΔ` first: `hn ≈ d*‖n‖` can be near the square root of floatmax
+    # when `hn*hn` would overflow, while `hn*invΔ ≈ d/‖n‖` stays in range.
+    hninvΔ = hn*invΔ
+    rin = scale3(hninvΔ, n)
+    d2in = hninvΔ*hn
     inva = inv(a)
     invc = inv(c)
     # The closest points on `x` of the end points of `y`, and on `y` of the

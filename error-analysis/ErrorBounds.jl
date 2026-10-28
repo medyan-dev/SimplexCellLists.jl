@@ -214,6 +214,10 @@ absolute value of the exact result, not just a bound, as division needs.
 
 `root`, if set, is `(abs, rel)` for a nonnegative result `ρ²`, such as a
 squared distance: `|√computed - ρ| ≤ u*(abs + rel*ρ)`.
+
+`sqscale`, if set, records that this is the product `r*w` with `w` a
+nonnegative exact square, so that a later `*r` is recognized as a squared
+distance, as in `(hN*invΔ)*hN`.
 """
 struct EB <: Real
     mag::SPoly
@@ -224,8 +228,11 @@ struct EB <: Real
     input::Union{Nothing, Sym}
     con::Union{Nothing, Q}
     root::Union{Nothing, Tuple{SPoly, Q}}
+    sqscale::Union{Nothing, Tuple{EB, EB}}
 end
 
+EB(mag, err, rel, nonneg, exact, input, con, root) =
+    EB(mag, err, rel, nonneg, exact, input, con, root, nothing)
 EB(c::Real) = EB(SPoly(abs(c)), SPoly(), zero(Q), c ≥ 0, true, nothing, Q(c), nothing)
 withrel(mag, rel, nonneg, exact) = EB(mag, rel*mag, rel, nonneg, exact, nothing, nothing, nothing)
 withabs(mag, err, nonneg, exact) = EB(mag, err, nothing, nonneg, exact, nothing, nothing, nothing)
@@ -418,6 +425,22 @@ function Base.:*(a::EB, b::EB)
         sq = _sqrtmag(w.mag)
         sq === nothing && continue
         return _withroot(x, (s.root[1]*sq, s.root[2] + w.rel/2 + Q(1//2)))
+    end
+    # `(r*w)*r` with the recorded exact square `w`: the same two roundings as
+    # `(r*r)*w`, so the same distance bound as the two rules above combined.
+    for (s, o) in ((a, b), (b, a))
+        s.sqscale === nothing && continue
+        r, w = s.sqscale
+        o === r || continue
+        sq = _sqrtmag(w.mag)
+        rt = r.rel === nothing ? (r.err, Q(1//2)) : (SPoly(), r.rel + Q(1//2))
+        return _withroot(x, (rt[1]*sq, rt[2] + w.rel/2 + Q(1//2)))
+    end
+    # Remember `r*w` with `w` a nonnegative exact square for the rule above.
+    for (r, w) in ((a, b), (b, a))
+        w.nonneg && w.exact && w.rel !== nothing || continue
+        _sqrtmag(w.mag) === nothing && continue
+        return EB(x.mag, x.err, x.rel, x.nonneg, x.exact, x.input, x.con, x.root, (r, w))
     end
     x
 end
