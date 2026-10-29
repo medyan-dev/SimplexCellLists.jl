@@ -2,19 +2,39 @@
     dist_sqr_r_s_t(x::Simplex{N,T}, y::Simplex{M,T})::Tuple{T, Vec3{T}, SVector{N-1,T}, SVector{M-1,T}}
 
 Return a tuple `(d², r, s, t)` of:
-1. `d²`: the minimum squared distance between the two simplexes.
-2. `r`: the minimum separation vector, pointing from a closest point on `x` to a closest point on `y`.
-3. `s`: the barycentric coordinates of a closest point on `x`.
-4. `t`: the barycentric coordinates of a closest point on `y`.
+1. `d²`: the minimum squared distance between the two simplexes, computed as `r⋅r`.
+2. `r`: the separation vector from a closest point on `x` to a closest point on `y`.
+3. `s`: the barycentric coordinates of that point on `x`.
+4. `t`: the barycentric coordinates of that point on `y`.
+
+These are computed in floating point, so they are approximate, as described
+under Accuracy below.
 
 `s` holds the barycentric weights of vertices `x[2:N]`; the weight of `x[1]`
-is implied as `1 - sum(s)`, so a closest point on `x` is:
+is implied as `1 - sum(s)`, so the point on `x` is:
 
     (1 - sum(s))*x[1] + sum(s[i]*x[i+1] for i in 1:N-1)
 
-Each weight is in `[0, 1]` with `sum(s) ≤ 1`. For a `Point`, `s` is empty;
-for a `LineSeg`, a closest point is `(1 - s[1])*x[1] + s[1]*x[2]`.
-`t` works the same way for `y`.
+For a `Point`, `s` is empty; for a `LineSeg`, the point is
+`(1 - s[1])*x[1] + s[1]*x[2]`. `t` works the same way for `y`.
+
+# Accuracy
+
+With `ℓ` the largest absolute coordinate of `x` and `y`, for finite
+coordinates below `floatmax(T)^(1/4)/4` (1e9 for `Float32`, 3e76 for
+`Float64`):
+
+- `√d²` is within `64*eps(T)*ℓ + floatmin(T)^(1/4)` of the exact minimum distance.
+- Each weight in `s` and `t` is in `[0, 1]`, and the computed `sum(s)` and
+  `sum(t)` are at most one.
+
+The error scales with `ℓ`, not with the distance, so simplexes that touch far
+from the origin can get a small positive `d²`.
+
+With a coordinate above `floatmax(T)^(1/4)/4`, or an infinite one, the results
+may be meaningless.
+
+With a NaN coordinate, `d²` is NaN.
 """
 function dist_sqr_r_s_t end
 
@@ -31,7 +51,7 @@ For finite coordinates below `(floatmax(T)^(1/4))/4` (1e9 in `Float32`,
    `sum(t)` are at most one.
 3. `d²` is computed from `r` alone, the same way in every method:
    `fma(r[3], r[3], fma(r[2], r[2], r[1]*r[1]))`.
-4. `|√d² - d| ≤ 8*eps(T)*ℓ + floatmin(T)^(1/4)`.
+4. `|√d² - d| ≤ 64*eps(T)*ℓ + floatmin(T)^(1/4)`.
 5. With `X(s)` and `Y(t)` the points the weights give, computed exactly,
    `‖r - (Y(t) - X(s))‖` is within the same bound.
 
@@ -53,7 +73,7 @@ this at the edges of the range and at hard points.
 
 Return the minimum squared distance between two simplexes.
 
-This is the `d²` of [`dist_sqr_r_s_t`](@ref), bit for bit.
+This is the `d²` of [`dist_sqr_r_s_t`](@ref), bit for bit, with the same accuracy.
 """
 @inline function dist_sqr(x::Simplex{N, T}, y::Simplex{M, T}) where {T, N, M}
     d2, r, s, t = dist_sqr_r_s_t(x, y)

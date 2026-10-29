@@ -264,6 +264,47 @@ end
     end
 end
 
+# A point on the face of a triangle, within 1e-69 of it, with coordinates
+# near 1e7. The distance came out as 9.96, which is 8.07*eps*ℓ, just over 8.
+@testset "Float32 point on the face of a triangle with large coordinates" begin
+    A = Float32.(SA[-10351314, -10323355, -10169968])
+    B = Float32.(SA[ 10351314,   6399932,   9067019])
+    C = Float32.(SA[  9871146,  10323356,  10169969])
+    P = Float32.(SA[  9718146,  10124128,  10000623])
+    x, y = SA[P], SA[A, B, C]
+    tol = 64*eps(Float32)*maximum(v -> maximum(abs, v), (x..., y...))
+    ref = sqrt(dist_sqr(map(v -> big.(v), x), map(v -> big.(v), y)))
+    for (a, b) in ((x, y), (y, x))
+        d2, r, s, t = dist_sqr_r_s_t(a, b)
+        @test abs(sqrt(d2) - ref) ≤ tol
+        @test all(≥(0), s) && all(≥(0), t) && sum(s) ≤ 1 && sum(t) ≤ 1
+        # `r` is the separation of the points the weights give.
+        pa = (1 - sum(big.(s))) .* a[1] .+ sum(big.(s) .* a[2:end]; init = zero(SVector{3, BigFloat}))
+        pb = (1 - sum(big.(t))) .* b[1] .+ sum(big.(t) .* b[2:end]; init = zero(SVector{3, BigFloat}))
+        @test norm(r .- (pb .- pa)) ≤ tol
+    end
+end
+
+# The end point of a long line segment 0.0135 from a short one, with the long
+# one across the range. With the short one first, `t` on the long one from
+# the lines through them, which is 1 - 2e-8, rounded to 3 eps short of one,
+# 9.7 along it. The distance came out as 9.43, which is 8.12*eps*ℓ.
+@testset "Float32 end point of a long line segment near a short one" begin
+    x = SA[SA[1.9877764f6, 9.505106f6, 9.729709f6], SA[-9.696928f6, -5.704686f6, -9.494322f6]]
+    y = SA[SA[-9.676423f6, -5.6547575f6, -9.56445f6], SA[-9.731833f6, -5.7896785f6, -9.374942f6]]
+    tol = 64*eps(Float32)*maximum(v -> maximum(abs, v), (x..., y...))
+    ref = sqrt(dist_sqr(map(v -> big.(v), x), map(v -> big.(v), y)))
+    for (a, b) in ((x, y), (y, x))
+        d2, r, s, t = dist_sqr_r_s_t(a, b)
+        @test abs(sqrt(d2) - ref) ≤ tol
+        @test 0 ≤ s[1] ≤ 1 && 0 ≤ t[1] ≤ 1
+        # `r` is the separation of the points the weights give.
+        pa = (1 - big(s[1])) .* a[1] .+ big(s[1]) .* a[2]
+        pb = (1 - big(t[1])) .* b[1] .+ big(t[1]) .* b[2]
+        @test norm(r .- (pb .- pa)) ≤ tol
+    end
+end
+
 # Hard points: one coordinate carrying the separation, separations that
 # cancel, nearly parallel line segments, and points on the border between
 # two closest features, where rounding picks either. Each is tested as given,
