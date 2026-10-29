@@ -3,25 +3,24 @@
 
 Return a tuple `(d², r, s, t)` of:
 1. `d²`: the minimum squared distance between the two simplexes.
-2. `r`: the minimum separation vector, pointing from the closest point on `x` to the closest point on `y`.
-3. `s`: the barycentric coordinates of the closest point on `x`.
-4. `t`: the barycentric coordinates of the closest point on `y`.
+2. `r`: the minimum separation vector, pointing from a closest point on `x` to a closest point on `y`.
+3. `s`: the barycentric coordinates of a closest point on `x`.
+4. `t`: the barycentric coordinates of a closest point on `y`.
 
 `s` holds the barycentric weights of vertices `x[2:N]`; the weight of `x[1]`
-is implied as `1 - sum(s)`, so the closest point on `x` is:
+is implied as `1 - sum(s)`, so a closest point on `x` is:
 
     (1 - sum(s))*x[1] + sum(s[i]*x[i+1] for i in 1:N-1)
 
 Each weight is in `[0, 1]` with `sum(s) ≤ 1`. For a `Point`, `s` is empty;
-for a `LineSeg`, the closest point is `(1 - s[1])*x[1] + s[1]*x[2]`.
+for a `LineSeg`, a closest point is `(1 - s[1])*x[1] + s[1]*x[2]`.
 `t` works the same way for `y`.
 """
 function dist_sqr_r_s_t end
 
 #=
-What a `dist_sqr_r_s_t` method must do to be correct, for an element type `T`
-(or `SIMD.Vec` lanes of it). Here `d` is the exact distance between the
-simplexes as given, in `T`, and `ℓ` is the largest absolute coordinate.
+What a `dist_sqr_r_s_t` method must do to be correct, for an element type `T`. Here `d` is the exact distance between the
+simplexes as given, and `ℓ` is the largest absolute coordinate.
 
 For finite coordinates below `(floatmax(T)^(1/4))/4` (1e9 in `Float32`,
 3e76 in `Float64`):
@@ -30,22 +29,23 @@ For finite coordinates below `(floatmax(T)^(1/4))/4` (1e9 in `Float32`,
    (repeated vertices, zero length edges, collinear triangles).
 2. Each weight in `s` and `t` is in `[0, 1]`, and the computed `sum(s)` and
    `sum(t)` are at most one.
-3. `r` is about the separation between the points the weights give, and `d²`
-   is about `dot(r, r)`. Neither needs to be exact.
-4. `|√d² - d| ≤ c₁*eps(T)*ℓ + c₂*floatmin(T)^(1/4)`, with `c₁` a small
-   constant (the tests allow 64 right now).
-   This holds for any shape, including slivers and nearly parallel line
-   segments: the error must not grow like one over an angle.
+3. `d²` is computed from `r` alone, the same way in every method:
+   `fma(r[3], r[3], fma(r[2], r[2], r[1]*r[1]))`.
+4. `|√d² - d| ≤ 8*eps(T)*ℓ + floatmin(T)^(1/4)`.
+5. With `X(s)` and `Y(t)` the points the weights give, computed exactly,
+   `‖r - (Y(t) - X(s))‖` is within the same bound.
 
 The `floatmin(T)^(1/4)` term (3e-10 in `Float32`, 1e-77 in `Float64`) is only
 for when something underflows. Then accuracy may be lost, but only by that
 much.
 
-Above `floatmax(T)^(1/4)` anything goes. The methods must also be branch
-free, with each `SIMD.Vec` lane bit identical to the scalar method.
+Above `(floatmax(T)^(1/4))/4` anything goes, except that for any
+coordinates, if one is `NaN`, `d²` is `NaN`.
 
-`tiny_normal_cases` and `worst_case_points` in test/test-mindistance.jl check
-this at the edges of the range and at the worst case points.
+The methods must also accept `SIMD.Vec` elements and be bit identical to the scalar method.
+
+`tiny_normal_cases` and `hard_points` in test/test-mindistance.jl partially check
+this at the edges of the range and at hard points.
 =#
 
 """
@@ -85,8 +85,8 @@ end
 end
 
 # Branch free update of the running minimum `best` with `cand`.
-# Ties keep the earlier minimum.
-@inline _min_d2_r_s_t(best, cand) = _select_d2_r_s_t(cand[1] < best[1], cand, best)
+# Ties keep the earlier minimum. A NaN `d2` is kept, so a NaN coordinate gives a NaN `d2`.
+@inline _min_d2_r_s_t(best, cand) = _select_d2_r_s_t((cand[1] < best[1]) | isnan(cand[1]), cand, best)
 
 # The methods
 

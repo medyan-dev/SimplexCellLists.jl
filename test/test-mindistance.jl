@@ -192,7 +192,7 @@ end
     for (x, y) in cases
         x = map(v -> SVector{3, T}(v), x)
         y = map(v -> SVector{3, T}(v), y)
-        tol = 64*eps(T)*maximum(v -> maximum(abs, v), (x..., y...))
+        tol = 8*eps(T)*maximum(v -> maximum(abs, v), (x..., y...))
         for (a, b) in ((x, y), (y, x))
             ref = sqrt(dist_sqr(map(v -> big.(v), a), map(v -> big.(v), b)))
             d2, r, s, t = dist_sqr_r_s_t(a, b)
@@ -250,7 +250,7 @@ end
     for (x, y) in cases
         x = map(v -> SVector{3, T}(v), x)
         y = map(v -> SVector{3, T}(v), y)
-        tol = 64*eps(T)*maximum(v -> maximum(abs, v), (x..., y...))
+        tol = 8*eps(T)*maximum(v -> maximum(abs, v), (x..., y...))
         for (a, b) in ((x, y), (y, x))
             ref = sqrt(dist_sqr(map(v -> big.(v), a), map(v -> big.(v), b)))
             d2, r, s, t = dist_sqr_r_s_t(a, b)
@@ -264,91 +264,69 @@ end
     end
 end
 
-# Worst-case accuracy points. Each case pins one branch domain (or branch
-# boundary) of a distance kernel at the sharpest known input, with a
-# first-order error bound |√d̂² - d| ≤ u·bound(exact sizes), u = eps(T)/2,
-# evaluated at the point and rounded up ~1.3x as margin for how the sizes
-# drift under the noise below.
-# Each point is tested as given, then with Gaussian coordinate noise of a few
-# ulps: enough to scramble every rounding, and at the boundary points to make
-# the branch actually flip (their tolerance is the traced all-domain bound,
-# which includes the branch jump terms).
-const worst_case_points = [
-    # point-point: 5u/2·d, attained when one coordinate carries the separation.
-    ("point-point, one coordinate separation", 7.0,
+# Hard points: one coordinate carrying the separation, separations that
+# cancel, nearly parallel line segments, and points on the border between
+# two closest features, where rounding picks either. Each is tested as given,
+# then with Gaussian noise of a few ulps on the coordinates, which scrambles
+# the roundings and moves the border points to either side.
+const hard_points = [
+    ("point-point, one coordinate separation",
         ((-1.0, 0.03, -0.02),), ((1.0, 0.06, 0.03),)),
-    ("point-point, balanced coordinates", 11.0,
+    ("point-point, balanced coordinates",
         ((-0.95, -1.0, 0.9),), ((0.9, 0.85, -1.0),)),
-    # point-line: t clamped to 0 is exactly point-point (5u/2·d); the interior
-    # arm has the traced bound u(9‖p‖+3‖r‖+3/2·d); t clamped to 1 computes
-    # fl(p+r), u(‖p‖+‖r‖+5/2·d), tight when p+r cancels; the t* = 0 and t* = 1
-    # boundary points have exactly zero conditions built from cancelling
-    # order-1 products, so rounding picks either arm.
-    ("point-line, t clamped to 0", 7.0,
+    ("point-line, closest at the first end point",
         ((1.0, 0.12, -0.03),), ((-1.0, 0.0, 0.0), (-1.0, -1.0, 0.0))),
-    ("point-line, interior", 38.0,
+    ("point-line, closest inside",
         ((1.0, 0.0, 0.05),), ((-1.0, 1.0, 0.0), (-1.0, -1.0, 0.0))),
-    ("point-line, interior, aspect 10", 29.0,
+    ("point-line, closest inside a short line segment",
         ((1.0, 0.0, 0.0),), ((-1.0, 0.1, 0.02), (-1.0, -0.1, 0.02))),
-    ("point-line, t clamped to 1, p + r cancels", 8.0,
+    # The second end point is near the point, so `y[2] - x` cancels.
+    ("point-line, closest at the second end point",
         ((1.0, 1.0, 0.04),), ((-1.0, -1.0, 0.0), (0.98, 0.98, 0.0))),
-    ("point-line, boundary t* = 0", 35.0,
+    ("point-line, border at the first end point",
         ((1.0, 1.0, 0.0),), ((-1.0, 0.0, 0.0), (-0.5, -1.0, 0.0))),
-    ("point-line, boundary t* = 1", 26.0,
+    ("point-line, border at the second end point",
         ((0.5, 0.5, 0.0),), ((-1.0, 1.0, 0.0), (0.0, 0.0, 0.0))),
-    # point-triangle: the face arm claim is u(6‖BP‖+‖E0‖+‖E1‖+8d); the tilted
-    # triangle makes N generic, so the terms of hN = dot3(BP, N) are order 0.5
-    # and cancel — with a z = 0 triangle (as in the testsets above) hN is a
-    # single product and this error path is never exercised. Edges and
-    # vertices reuse the point-line rows on (BP, E) with rounded-sum charges.
-    ("point-triangle, face of a tilted triangle", 17.0,
+    # A tilted triangle, so no product in `N` or `N⋅(X - A)` is exact.
+    ("point-triangle, over the face of a tilted triangle",
         ((-0.01, 0.01, 0.29),), ((-0.9, -0.6, 0.2), (0.8, -0.2, -0.3), (-0.2, 0.9, 0.1))),
-    ("point-triangle, near face of a tilted triangle, hN cancels", 13.0,
+    ("point-triangle, near the face of a tilted triangle",
         ((-0.09, 0.03, 0.02),), ((-0.9, -0.6, 0.2), (0.8, -0.2, -0.3), (-0.2, 0.9, 0.1))),
-    ("point-triangle, edge 0 interior", 23.0,
+    ("point-triangle, closest inside edge AB",
         ((0.2, -0.9, 0.4),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
-    ("point-triangle, edge 2 interior", 24.0,
+    ("point-triangle, closest inside edge BC",
         ((0.56, 0.59, 0.3),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
-    ("point-triangle, vertex a", 1.7,
+    ("point-triangle, closest at vertex A",
         ((-1.0, -0.95, 0.35),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
-    ("point-triangle, vertex b", 6.5,
+    ("point-triangle, closest at vertex B",
         ((1.0, -0.45, 0.3),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
-    # x over the midpoint of edge 0: the tbar numerator of the inside test is
-    # exactly zero, so rounding decides face vs edge.
-    ("point-triangle, inside-test boundary", 164.0,
+    ("point-triangle, border of the face and edge AB, over its midpoint",
         ((-0.05, -0.4, 0.6),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
-    # x exactly on the u0 = 1 plane through b: edge 0 vs vertex b flips.
-    ("point-triangle, clamp boundary at vertex b", 192.0,
+    ("point-triangle, border of edge AB and vertex B",
         ((0.88, -0.54, 0.3),), ((-0.9, -0.6, 0.0), (0.8, -0.2, 0.0), (-0.2, 0.9, 0.0))),
-    # line-line: the crossing arm claim is u(6‖W‖+‖P‖+‖Q‖+8d) with no 1/sinθ;
-    # the near parallel point (sinθ ≈ 0.008, where the Gram form a*c - b*b
-    # loses ~125x) must meet the same bound as the generic crossing. Edge and
-    # corner rows reuse the point-line rows on (W, P), (W, Q), etc.
-    ("line-line, generic crossing", 17.0,
+    ("line-line, crossing",
         ((-1.0, -0.2, 0.0), (1.0, 0.2, 0.0)), ((-0.3, -1.0, 0.25), (0.3, 1.0, 0.25))),
-    ("line-line, nearly parallel crossing", 8.0,
+    ("line-line, nearly parallel crossing",
         ((-1.0, -0.004, 0.0), (1.0, 0.004, 0.0)), ((-1.0, 0.004, 0.15), (1.0, -0.004, 0.15))),
-    ("line-line, s interior, t = 0", 25.0,
+    ("line-line, inside x and at the first end point of y",
         ((-1.0, -0.2, 0.0), (1.0, 0.2, 0.0)), ((0.1, 0.3, 0.3), (0.9, 0.9, 0.5))),
-    ("line-line, s = 0, t interior", 10.5,
+    ("line-line, at the first end point of x and inside y",
         ((-0.4, -0.3, 0.0), (0.56, 0.42, 0.0)), ((-0.31, -0.67, 0.25), (-0.73, -0.11, 0.25))),
-    ("line-line, corner (0,0)", 2.2,
+    ("line-line, at the first end points",
         ((-0.4, -0.3, 0.0), (0.56, 0.42, 0.0)), ((-0.7, -0.8, 0.3), (-1.0, -0.9, 0.5))),
-    # Q crosses exactly over P0: the sbar numerator of the inside test is zero.
-    ("line-line, inside-test boundary", 66.0,
+    ("line-line, border with y crossing over the first end point of x",
         ((-0.8, -0.6, 0.0), (0.8, 0.6, 0.0)), ((-0.68, -0.76, 0.25), (-0.92, -0.44, 0.25))),
-    # (Q0 - P0) ⊥ Q exactly: the t* = 0 clamp boundary in the s* = 0 region.
-    ("line-line, clamp boundary at corner (0,0)", 53.0,
+    ("line-line, border of the first end points and inside y",
         ((-0.4, -0.3, 0.0), (0.56, 0.42, 0.0)), ((-0.52, -0.39, 0.25), (-0.82, 0.01, 0.25))),
 ]
 
-@testset "worst-case point: $name" for (name, tolu, xt, yt) in worst_case_points
+@testset "hard point: $name" for (name, xt, yt) in hard_points
     rng = Random.Xoshiro(2026)
     for T in (Float32, Float64)
-        tol = tolu*eps(T)/2
         for σ in (0, 8, 64, 1024) .* eps(T), _ in 1:(iszero(σ) ? 1 : 100)
             x = SVector(map(v -> SVector{3, T}(v .+ σ .* randn(rng, 3)), xt))
             y = SVector(map(v -> SVector{3, T}(v .+ σ .* randn(rng, 3)), yt))
+            tol = 8*eps(T)*maximum(v -> maximum(abs, v), (x..., y...))
             ref = sqrt(dist_sqr(map(v -> big.(v), x), map(v -> big.(v), y)))
             @test abs(sqrt(dist_sqr(x, y)) - ref) ≤ tol
             @test abs(sqrt(dist_sqr(y, x)) - ref) ≤ tol
@@ -407,7 +385,7 @@ const tiny_normal_cases = [
     y = SVector(map(v -> SVector{3, T}(v), yt))
     ref = sqrt(dist_sqr(map(v -> big.(v), x), map(v -> big.(v), y)))
     # A few roundings of the largest coordinate, plus the underflow floor.
-    tol = 64*eps(T)*maximum(v -> maximum(abs, v), (x..., y...)) + floatmin(T)^(1/4)
+    tol = 8*eps(T)*maximum(v -> maximum(abs, v), (x..., y...)) + floatmin(T)^(1/4)
     @test abs(sqrt(dist_sqr(x, y)) - ref) ≤ tol
     @test abs(sqrt(dist_sqr(y, x)) - ref) ≤ tol
 end
@@ -441,6 +419,57 @@ end
         bs = ntuple(_ -> rand_simplex(T, M), Val(W))
         d2 = dist_sqr(simplex_lanes(as), simplex_lanes(bs))
         @test all(l -> d2[l] === dist_sqr(as[l], bs[l]), 1:W)
+    end
+end
+
+# Coordinates just below `floatmax(T)^(1/4)/4`, the top of the range, where
+# `N⋅N` and the triple products are near `floatmax`: the hard points scaled
+# up, and `rand_simplex` scaled up, half of them with coordinates in
+# `(-L, 0, L)`, where the edges are longest, and repeated vertices, parallel
+# edges, and coplanar triangles are common.
+@testset "$T near the top of the range" for T in (Float32, Float64)
+    L = prevfloat(floatmax(T)^T(1/4)/4)
+    cases = Any[]
+    for (name, xt, yt) in hard_points
+        push!(cases, (SVector(map(v -> SVector{3, T}(L .* v), xt)), SVector(map(v -> SVector{3, T}(L .* v), yt))))
+    end
+    for N in 1:3, M in 1:3, _ in 1:300
+        push!(cases, (rand_simplex(T, N) .* L, rand_simplex(T, M) .* L))
+    end
+    for (x, y) in cases, (a, b) in ((x, y), (y, x))
+        d2, r, s, t = dist_sqr_r_s_t(a, b)
+        @test isfinite(d2) && all(isfinite, r)
+        @test all(≥(0), s) && all(≥(0), t) && sum(s) ≤ 1 && sum(t) ≤ 1
+        tol = 8*eps(T)*maximum(v -> maximum(abs, v), (a..., b...))
+        ref = sqrt(dist_sqr(map(v -> big.(v), a), map(v -> big.(v), b)))
+        @test abs(sqrt(d2) - ref) ≤ tol
+        pa = (1 - sum(big.(s))) .* a[1] .+ sum(big.(s) .* a[2:end]; init = zero(SVector{3, BigFloat}))
+        pb = (1 - sum(big.(t))) .* b[1] .+ sum(big.(t) .* b[2:end]; init = zero(SVector{3, BigFloat}))
+        @test norm(r .- (pb .- pa)) ≤ tol
+    end
+end
+
+# A NaN coordinate anywhere gives a NaN `d²`, whatever the candidate it would
+# lose to, also in SIMD lanes next to lanes without NaN. The weights stay in
+# range.
+@testset "$T NaN coordinate $N to $M" for T in (Float32, Float64), N in 1:3, M in 1:3
+    for _ in 1:20, i in 1:(N + M), k in 1:3
+        x = rand_simplex(T, N)
+        y = rand_simplex(T, M)
+        if i ≤ N
+            x = setindex(x, setindex(x[i], T(NaN), k), i)
+        else
+            y = setindex(y, setindex(y[i - N], T(NaN), k), i - N)
+        end
+        for (a, b) in ((x, y), (y, x))
+            d2, r, s, t = dist_sqr_r_s_t(a, b)
+            @test isnan(d2)
+            @test all(w -> 0 ≤ w ≤ 1, s) && all(w -> 0 ≤ w ≤ 1, t)
+            as = (a, ntuple(_ -> rand_simplex(T, length(a)), Val(7))...)
+            bs = (b, ntuple(_ -> rand_simplex(T, length(b)), Val(7))...)
+            d2s = dist_sqr(simplex_lanes(as), simplex_lanes(bs))
+            @test isnan(d2s[1]) && all(l -> d2s[l] === dist_sqr(as[l], bs[l]), 2:8)
+        end
     end
 end
 nothing
