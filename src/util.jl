@@ -1,5 +1,8 @@
+# Clamp `x` to `[0, 1]`, with NaN to zero. Written as selects that LLVM makes
+# one max and one min, as `x > 0` is false for NaN.
 @inline function clamp01nan(x)
-    SIMD.vifelse(isnan(x), zero(x), Base.FastMath.min_fast(Base.FastMath.max_fast(x, zero(x)), one(x)))
+    y = SIMD.vifelse(x > zero(x), x, zero(x))
+    SIMD.vifelse(y < one(x), y, one(x))
 end
 
 """
@@ -27,6 +30,31 @@ Also works on `SVector{3, SIMD.Vec{N,T}}`, bit identical to the scalar version i
 end
 
 """
+    cross3_accurate(a::Vec3, b::Vec3)
+
+Return the cross product of two 3D vectors, each component accurate to about
+one rounding, using Kahan's algorithm for `p*q - u*v` with fused multiply adds.
+
+[`cross3`](@ref) is cheaper, but for nearly parallel `a` and `b` its
+components cancel, with an error of about a rounding of `norm(a)*norm(b)`.
+
+Also works on `SVector{3, SIMD.Vec{N,T}}`, bit identical to the scalar version in each lane.
+"""
+@inline function cross3_accurate(a::Vec3, b::Vec3)
+    SVector(
+        _det2_accurate(a[2], b[3], a[3], b[2]),
+        _det2_accurate(a[3], b[1], a[1], b[3]),
+        _det2_accurate(a[1], b[2], a[2], b[1]),
+    )
+end
+
+# `p*q - u*v`, with the rounding of `u*v` recovered by a fused multiply add.
+@inline function _det2_accurate(p, q, u, v)
+    uv = u*v
+    fma(p, q, -uv) + fma(-u, v, uv)
+end
+
+"""
     scale3(t, v::Vec3)
     scale3(v::Vec3, t)
 
@@ -36,6 +64,15 @@ Unlike `t*v`, this also works when `t` is a `SIMD.Vec{N,T}`.
 """
 @inline scale3(t::Union{Number, SIMD.Vec}, v::Vec3) = SVector(t*v[1], t*v[2], t*v[3])
 @inline scale3(v::Vec3, t::Union{Number, SIMD.Vec}) = SVector(v[1]*t, v[2]*t, v[3]*t)
+
+"""
+    fma3(t, a::Vec3, b::Vec3)
+
+Return `t*a + b` elementwise, computed with fused multiply adds.
+
+Also works when `t` is a `SIMD.Vec{N,T}`, bit identical to the scalar version in each lane.
+"""
+@inline fma3(t::Union{Number, SIMD.Vec}, a::Vec3, b::Vec3) = SVector(fma(t, a[1], b[1]), fma(t, a[2], b[2]), fma(t, a[3], b[3]))
 
 function relu(x::T)::T where T
     SIMD.vifelse(x > zero(x), x, zero(x))
@@ -51,7 +88,7 @@ Return the Euclidean norm of a 3D vector, using [`dot3`](@ref) and an unchecked 
 
 Also works on `SVector{3, SIMD.Vec{N,T}}`.
 """
-norm_fast(v::Vec3) = _sqrt_fast(dot3(v, v))
+@inline norm_fast(v::Vec3) = _sqrt_fast(dot3(v, v))
 
 # Return the zero based XYZ grid index.
 # `pos_norm` has an origin at the center of the grid
