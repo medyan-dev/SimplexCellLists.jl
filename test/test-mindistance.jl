@@ -250,6 +250,62 @@ const ledger_cases = [
     end
 end
 
+# Small or thin simplexes, where a squared length, or a squared area like
+# `Δ = |n|²` in the line-line method, is out of range. When something
+# underflows the distance may lose accuracy, but it must stay finite and off
+# by at most about `floatmin^(1/4)`, which bounds the inradius of a triangle
+# with `Δ` below `floatmin`. The point-triangle method used to form `Δ`, and
+# returned `Inf` for a point over the face when `inv(Δ)` overflowed, or `NaN`
+# in the plane, even for a unit sliver. When `Δ` underflows the line-line
+# method skips the crossing, and when `‖r‖²` is subnormal the point-line
+# quotient for `t` keeps only a few bits, but both are within the floor.
+# Nearly parallel unit line segments do not reach this: their end points are
+# within about ℓ·sinθ of the crossing.
+const tiny_normal_cases = [
+    ("point-triangle, tiny, inv(Δ) overflows", Float32,
+        ((0.25e-10, 0.25e-10, 1e-10),), ((0, 0, 0), (1e-10, 0, 0), (0, 1e-10, 0))),
+    ("point-triangle, tiny, Δ underflows", Float32,
+        ((0.25e-12, 0.25e-12, 1e-12),), ((0, 0, 0), (1e-12, 0, 0), (0, 1e-12, 0))),
+    ("point-triangle, unit sliver, inv(Δ) overflows", Float32,
+        ((1.5, 0.6e-20, 0.1),), ((0, 0, 0), (1, 0, 0), (2, 1e-20, 0))),
+    ("point-triangle, unit sliver, in plane", Float32,
+        ((1.5, 0.6e-20, 0),), ((0, 0, 0), (1, 0, 0), (2, 1e-20, 0))),
+    ("line-line, tiny crossing, inv(Δ) overflows", Float32,
+        ((-0.5e-10, 0, 0), (0.5e-10, 0, 0)), ((0, -0.5e-10, 1e-10), (0, 0.5e-10, 1e-10))),
+    ("line-line, tiny crossing, Δ underflows", Float32,
+        ((-0.5e-12, 0, 0), (0.5e-12, 0, 0)), ((0, -0.5e-12, 1e-12), (0, 0.5e-12, 1e-12))),
+    ("point-triangle, tiny, inv(Δ) overflows", Float64,
+        ((0.25e-80, 0.25e-80, 1e-80),), ((0, 0, 0), (1e-80, 0, 0), (0, 1e-80, 0))),
+    ("point-triangle, tiny, Δ underflows", Float64,
+        ((0.25e-90, 0.25e-90, 1e-90),), ((0, 0, 0), (1e-90, 0, 0), (0, 1e-90, 0))),
+    ("point-triangle, unit sliver, inv(Δ) overflows", Float64,
+        ((1.5, 0.6e-160, 0.1),), ((0, 0, 0), (1, 0, 0), (2, 1e-160, 0))),
+    ("point-triangle, unit sliver, in plane", Float64,
+        ((1.5, 0.6e-160, 0),), ((0, 0, 0), (1, 0, 0), (2, 1e-160, 0))),
+    ("line-line, tiny crossing, inv(Δ) overflows", Float64,
+        ((-0.5e-80, 0, 0), (0.5e-80, 0, 0)), ((0, -0.5e-80, 1e-80), (0, 0.5e-80, 1e-80))),
+    ("line-line, tiny crossing, Δ underflows", Float64,
+        ((-0.5e-90, 0, 0), (0.5e-90, 0, 0)), ((0, -0.5e-90, 1e-90), (0, 0.5e-90, 1e-90))),
+    ("point-line, tiny, subnormal norm", Float32,
+        ((0.5e-22, 1e-22, 0),), ((0, 0, 0), (1e-22, 0, 0))),
+    ("point-line, tiny, subnormal norm", Float64,
+        ((0.5e-160, 1e-160, 0),), ((0, 0, 0), (1e-160, 0, 0))),
+    ("line-line, tiny, inv of a norm overflows", Float32,
+        ((0, 0, 0), (1e-21, 0, 0)), ((0.5e-21, 1e-21, 0), (0.5e-21, 2e-21, 0))),
+    ("line-line, tiny, inv of a norm overflows", Float64,
+        ((0, 0, 0), (1e-155, 0, 0)), ((0.5e-155, 1e-155, 0), (0.5e-155, 2e-155, 0))),
+]
+
+@testset "tiny normal: $name $T" for (name, T, xt, yt) in tiny_normal_cases
+    x = SVector(map(v -> SVector{3, T}(v), xt))
+    y = SVector(map(v -> SVector{3, T}(v), yt))
+    ref = sqrt(dist_sqr(map(v -> big.(v), x), map(v -> big.(v), y)))
+    # A few roundings of the largest coordinate, plus the underflow floor.
+    tol = 64*eps(T)*maximum(v -> maximum(abs, v), (x..., y...)) + floatmin(T)^(1/4)
+    @test abs(sqrt(dist_sqr(x, y)) - ref) ≤ tol
+    @test abs(sqrt(dist_sqr(y, x)) - ref) ≤ tol
+end
+
 # Return `W` simplices as one simplex with a lane per simplex.
 function simplex_lanes(xs::NTuple{W, SVector{N, SVector{3, T}}}) where {W, N, T}
     SVector{N}(ntuple(Val(N)) do v

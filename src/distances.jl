@@ -18,6 +18,36 @@ for a `LineSeg`, the closest point is `(1 - s[1])*x[1] + s[1]*x[2]`.
 """
 function dist_sqr_r_s_t end
 
+#=
+What a `dist_sqr_r_s_t` method must do to be correct, for an element type `T`
+(or `SIMD.Vec` lanes of it). Here `d` is the exact distance between the
+simplexes as given, in `T`, and `ℓ` is the largest absolute coordinate.
+
+For finite coordinates below about `floatmax(T)^(1/4)` (4e9 in `Float32`,
+1e77 in `Float64`):
+
+1. The result is finite: never `NaN` or `Inf`, even for degenerate simplexes
+   (repeated vertices, zero length edges, collinear triangles).
+2. Each weight in `s` and `t` is in `[0, 1]`, and the computed `sum(s)` and
+   `sum(t)` are at most one.
+3. `r` is about the separation between the points the weights give, and `d²`
+   is about `dot(r, r)`. Neither needs to be exact.
+4. `|√d² - d| ≤ c₁*eps(T)*ℓ + c₂*floatmin(T)^(1/4)`, with `c₁` a small
+   constant (the tests allow 64 right now).
+   This holds for any shape, including slivers and nearly parallel line
+   segments: the error must not grow like one over an angle.
+
+The `floatmin(T)^(1/4)` term (3e-10 in `Float32`, 1e-77 in `Float64`) is only
+for when something underflows. Then accuracy may be lost, but only by that
+much.
+
+Above `floatmax(T)^(1/4)` anything goes. The methods must also be branch
+free, with each `SIMD.Vec` lane bit identical to the scalar method.
+
+`tiny_normal_cases` and the ledger cases in test/test-mindistance.jl check
+this at the edges of the range and at the worst case points.
+=#
+
 """
     dist_sqr(x::Simplex{N,T}, y::Simplex{M,T})::T
 
@@ -72,82 +102,77 @@ end
     # Written as `y - x[1]` so it folds to `y[1]` when `x[1]` is positive zero.
     p = y[1] - x[1]
     t = clamp01nan(-dot3(p, r)/dot3(r, r))
-    d = p + scale3(t, r)
+    d = fma3(t, r, p)
     dot3(d, d), d, SVector{0,T}(), SVector{1,T}(t)
 end
 
 #=
-The closest point on the triangle is either the projection of the point onto
-the plane of the triangle, if that is inside the triangle, or on an edge.
+For the triangle `A`, `B`, `C`, the closest point is the projection `X'` of
+the point onto the plane if that is inside the triangle, and otherwise on an
+edge. Rather than test which, this takes the closest of three points of the
+triangle: the closest point on edges `AC` and `BC`, and `X'` with its weights
+clamped into the triangle, which also covers edge `AB`. Each is a point of
+the triangle, so none is closer than the true distance, and `d2` is
+`dot(r, r)` of its own separation `r`, which does not cancel.
 
-This avoids expanding the squared distance as a quadratic in the barycentric
-coordinates, which cancels: its absolute error scales with the squared size
-of the triangle, not with the distance. Here the distance inside is along the
-normal, and each edge candidate is `dot(r, r)` of its own separation `r`, so
-the error of the distance is about a rounding of the coordinates.
+The weights `(u, v)` of `X'` are a least squares solve. With
+`E1 = c1*E0 + e` and `e ⟂ E0`, `X - A = (u + v*c1)*E0 + v*e` plus a normal
+part, so `v = e⋅(X - A)/(e⋅e)` and `u = E0⋅(X - A)/(E0⋅E0) - v*c1`. Then
+`u*E0 + v*E1 = (u + v*c1)*E0 + v*e`, so the errors of `u` and `v` move the
+point by about a rounding of `‖X - A‖`, not over the sine of an angle.
 
-`N` is from `cross3_accurate`, so it is exactly zero for an exactly
-degenerate triangle, which then always uses the edges. With `cross3`, `N` of
-a triangle with two equal edges is a rounding error, and the inside test can
-pass by mistake. Unlike `(b*e - c*d)/(a*c - b*b)`, the cross product form of
-the barycentric coordinates is also reliable for slivers.
+`e` itself is never formed. `E1 - c1*E0` cancels for a sliver, but with
+`N = E0×E1`, `N×E0 = (E0⋅E0)*e`, so `v = N⋅(E0×(X - A))/(N⋅N)`. The rounding
+of `E0×(X - A)` moves `X'` by about a rounding of `‖X - A‖`. The rounding of
+`N` is about a rounding of `‖E0‖*‖E1‖`. Along `N` it only scales `v`, which
+moves `X'` by at most about a rounding of `‖E1‖`. In the plane it tilts the
+normal, which moves `X'` in the plane by about a rounding of the height over
+the sine of the sliver's angle. That adds to the distance in second order,
+and when it is large the sliver is thin and an edge is close: the smaller of
+the two is at most about a rounding of `‖E1‖`. The two cross products don't
+wait on each other or on a division, which keeps the chain of dependent
+operations short.
 
-Each barycentric coordinate is computed from its own edge, with an error of
-about a rounding of `‖BP‖` times the length of that edge over `‖N‖`, so the
-inside test is off by about a rounding of `‖BP‖` in distance from that edge.
-Testing `sbar + tbar ≤ 1` instead puts the errors of `sbar` and `tbar`, which
-scale with the long edges, against the short edge `E2` of a needle, and in
-`Float32` a point 0.2 past the short edge of a needle 100 long could be
-judged inside.
+Edge `AB` is `v = 0`, and `u` is solved after `v` is clamped. So when `X'`
+is past `AB`, `v` clamps to zero and `X'` becomes exactly the closest point
+on `AB`, with an exact zero weight. `v = min(v, 1 - u)` then keeps `X'` in
+the triangle. Past `AC` or `BC` it is just some point of the triangle, and
+the edge candidates give the closest point.
 
-The projection onto the plane is from Kahan, "Computing Cross-Products and
-Rotations in 2- and 3-Dimensional Euclidean Spaces" (2016), §9, and the
-edges as in Ericson, "Real-Time Collision Detection" (2005), §5.1.5. See the
-`LineSeg`-`LineSeg` method for the references on `cross3_accurate`.
+`N⋅N` and `N⋅(E0×(X - A))` are at most fourth powers of the coordinates, so
+they are in range. When `N⋅N` underflows, every point of the triangle is
+within about `floatmin^(1/4)` of edges `AC` and `BC`: within `‖E0‖/2` and
+within the height over `AB`, whose product is `‖N‖/2`. A degenerate triangle
+or edge gives NaN or infinite weights, which `clamp01nan` makes a point of
+the triangle, and then the edges are exact or within the length of the edge.
 =#
 @inline function dist_sqr_r_s_t(x::Point{T}, y::Triangle{T}) where T
-    B = y[1]
-    E0 = y[2] - B
-    E1 = y[3] - B
-    # Written as `y - x[1]` so it folds to `B` when `x[1]` is positive zero.
-    BP = B - x[1]
-    N = cross3_accurate(E0, E1)
-    Δ = dot3(N, N)
-    invΔ = inv(Δ)
-    # The barycentric coordinates of the projection onto the plane, by
-    # Lagrange's identity, without the cancellation in `(b*e - c*d)/(a*c - b*b)`.
-    sbar = dot3(N, cross3(E1, BP))*invΔ
-    tbar = dot3(N, cross3(BP, E0))*invΔ
-    # The edge from `B + E0` to `B + E1`.
+    A = y[1]
+    E0 = y[2] - A
+    E1 = y[3] - A
+    # Written as `y - x[1]` so it folds to `A` when `x[1]` is positive zero.
+    AX = A - x[1]
+    ia = inv(dot3(E0, E0))
+    c1 = dot3(E0, E1)*ia
+    N = cross3(E0, E1)
+    # The weights of `B` and `C` at `X'`, clamped into the triangle, `v` first.
+    v = clamp01nan(-dot3(N, cross3(E0, AX))/dot3(N, N))
+    u = clamp01nan(fma(-v, c1, -dot3(E0, AX)*ia))
+    # A select, as `Base.min` also checks for NaN, which can't happen here.
+    w = one(T) - u
+    v = SIMD.vifelse(v < w, v, w)
+    rin = fma3(v, E1, fma3(u, E0, AX))
+    # The closest points on the edges `AC` and `BC`.
+    u1 = clamp01nan(-dot3(E1, AX)/dot3(E1, E1))
+    r1 = fma3(u1, E1, AX)
+    best = (dot3(r1, r1), r1, zero(T), u1)
     E2 = E1 - E0
-    BP2 = BP + E0
-    # The weight of `B`, `1 - sbar - tbar`, from its own edge. The sum
-    # `sbar + tbar` cancels when `E2` is much shorter than `E0` and `E1`.
-    wbar = dot3(N, cross3(BP2, E2))*invΔ
-    # False for NaN, from a degenerate triangle.
-    inside = (zero(T) ≤ sbar) & (zero(T) ≤ tbar) & (zero(T) ≤ wbar)
-    hN = dot3(BP, N)
-    # `hN*invΔ` first: `hN ≈ d*‖N‖` can be near the square root of floatmax
-    # when `hN*hN` would overflow, while `hN*invΔ ≈ d/‖N‖` stays in range.
-    hNinvΔ = hN*invΔ
-    rin = scale3(hNinvΔ, N)
-    d2in = hNinvΔ*hN
-    # The closest points on the edges from `B` along `E0` and `E1`, and from
-    # `B + E0` along `E2`.
-    u0 = clamp01nan(-dot3(E0, BP)/dot3(E0, E0))
-    r0 = BP + scale3(u0, E0)
-    best = (dot3(r0, r0), r0, u0, zero(T))
-    u1 = clamp01nan(-dot3(E1, BP)/dot3(E1, E1))
-    r1 = BP + scale3(u1, E1)
-    best = _min_d2_r_s_t(best, (dot3(r1, r1), r1, zero(T), u1))
-    u2 = clamp01nan(-dot3(BP2, E2)/dot3(E2, E2))
-    r2 = BP2 + scale3(u2, E2)
+    BX = AX + E0
+    u2 = clamp01nan(-dot3(BX, E2)/dot3(E2, E2))
+    r2 = fma3(u2, E2, BX)
     best = _min_d2_r_s_t(best, (dot3(r2, r2), r2, one(T) - u2, u2))
-    # Inside, `sbar` and `sbar + tbar` can round above one, so cap them to
-    # keep the weights a convex combination.
-    s_in = Base.FastMath.min_fast(sbar, one(T))
-    t_in = Base.FastMath.min_fast(tbar, one(T) - s_in)
-    d2, r, s, t = _select_d2_r_s_t(inside, (d2in, rin, s_in, t_in), best)
+    # Last, so a tie with an edge keeps the edge's exact zero weight.
+    d2, r, s, t = _min_d2_r_s_t(best, (dot3(rin, rin), rin, u, v))
     d2, r, SVector{0,T}(), SVector{2,T}(s, t)
 end
 
@@ -157,7 +182,11 @@ projections onto one of these planes cross, the closest points are at the
 crossing and the separation is along `n`. Otherwise the closest points are
 an end point of one line segment and its closest point on the other.
 
-This is accurate for the same reason as the `Point`-`Triangle` method. `n` is
+This avoids expanding the squared distance as a quadratic in the parameters,
+which cancels: its absolute error scales with the squared length of the line
+segments, not with the distance. Here the distance at a crossing is along
+`n`, and each end point candidate is `dot(r, r)` of its own separation `r`,
+so the error of the distance is about a rounding of the coordinates. `n` is
 from `cross3_accurate`: with `cross3`, the error of the distance between
 nearly parallel line segments grows like one over the angle between them.
 

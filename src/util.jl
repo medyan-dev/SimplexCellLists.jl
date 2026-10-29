@@ -1,5 +1,8 @@
+# Clamp `x` to `[0, 1]`, with NaN to zero. Written as selects that LLVM makes
+# one max and one min, as `x > 0` is false for NaN.
 @inline function clamp01nan(x)
-    SIMD.vifelse(isnan(x), zero(x), Base.FastMath.min_fast(Base.FastMath.max_fast(x, zero(x)), one(x)))
+    y = SIMD.vifelse(x > zero(x), x, zero(x))
+    SIMD.vifelse(y < one(x), y, one(x))
 end
 
 """
@@ -61,6 +64,15 @@ Unlike `t*v`, this also works when `t` is a `SIMD.Vec{N,T}`.
 """
 @inline scale3(t::Union{Number, SIMD.Vec}, v::Vec3) = SVector(t*v[1], t*v[2], t*v[3])
 @inline scale3(v::Vec3, t::Union{Number, SIMD.Vec}) = SVector(v[1]*t, v[2]*t, v[3]*t)
+
+"""
+    fma3(t, a::Vec3, b::Vec3)
+
+Return `t*a + b` elementwise, computed with fused multiply adds.
+
+Also works when `t` is a `SIMD.Vec{N,T}`, bit identical to the scalar version in each lane.
+"""
+@inline fma3(t::Union{Number, SIMD.Vec}, a::Vec3, b::Vec3) = SVector(fma(t, a[1], b[1]), fma(t, a[2], b[2]), fma(t, a[3], b[3]))
 
 function relu(x::T)::T where T
     SIMD.vifelse(x > zero(x), x, zero(x))
