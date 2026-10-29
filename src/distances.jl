@@ -74,15 +74,14 @@ end
     d2, -r, t, s
 end
 
+# Branch free select, elementwise for an `SVector`. Works on `SIMD.Vec` lanes.
+@inline _vifelse(c, a, b) = SIMD.vifelse(c, a, b)
+@inline _vifelse(c, a::SVector{N}, b::SVector{N}) where N = SVector(ntuple(i -> SIMD.vifelse(c, a[i], b[i]), Val(N)))
+
 # Branch free selection of `(d2, r, s, t)` tuples, with `r` a `Vec3` and `s`
-# and `t` scalars. Works on `SIMD.Vec` lanes.
+# and `t` scalars or `SVector`s. Works on `SIMD.Vec` lanes.
 @inline function _select_d2_r_s_t(c, (d2a, ra, sa, ta), (d2b, rb, sb, tb))
-    (
-        SIMD.vifelse(c, d2a, d2b),
-        SVector(SIMD.vifelse(c, ra[1], rb[1]), SIMD.vifelse(c, ra[2], rb[2]), SIMD.vifelse(c, ra[3], rb[3])),
-        SIMD.vifelse(c, sa, sb),
-        SIMD.vifelse(c, ta, tb),
-    )
+    _vifelse(c, d2a, d2b), _vifelse(c, ra, rb), _vifelse(c, sa, sb), _vifelse(c, ta, tb)
 end
 
 # Branch free update of the running minimum `best` with `cand`.
@@ -151,16 +150,7 @@ the triangle, and then the edges are exact or within the length of the edge.
     E1 = y[3] - A
     # Written as `y - x[1]` so it folds to `A` when `x[1]` is positive zero.
     AX = A - x[1]
-    ia = inv(dot3(E0, E0))
-    c1 = dot3(E0, E1)*ia
-    N = cross3(E0, E1)
-    # The weights of `B` and `C` at `X'`, clamped into the triangle, `v` first.
-    v = clamp01nan(-dot3(N, cross3(E0, AX))/dot3(N, N))
-    u = clamp01nan(fma(-v, c1, -dot3(E0, AX)*ia))
-    # A select, as `Base.min` also checks for NaN, which can't happen here.
-    w = one(T) - u
-    v = SIMD.vifelse(v < w, v, w)
-    rin = fma3(v, E1, fma3(u, E0, AX))
+    d2in, rin, u, v = _tri_face_candidate(AX, E0, E1, cross3(E0, E1))
     # The closest points on the edges `AC` and `BC`.
     u1 = clamp01nan(-dot3(E1, AX)/dot3(E1, E1))
     r1 = fma3(u1, E1, AX)
@@ -171,8 +161,27 @@ the triangle, and then the edges are exact or within the length of the edge.
     r2 = fma3(u2, E2, BX)
     best = _min_d2_r_s_t(best, (dot3(r2, r2), r2, one(T) - u2, u2))
     # Last, so a tie with an edge keeps the edge's exact zero weight.
-    d2, r, s, t = _min_d2_r_s_t(best, (dot3(rin, rin), rin, u, v))
+    d2, r, s, t = _min_d2_r_s_t(best, (d2in, rin, u, v))
     d2, r, SVector{0,T}(), SVector{2,T}(s, t)
+end
+
+# The point `X'` of the triangle `A`, `B`, `C` for the point `X`, as above,
+# with `AX = A - X`, `E0 = B - A`, `E1 = C - A`, and `N` about `E0×E1`.
+# This is the point and triangle kernel without its edges, for the line
+# segment and triangle kernels, which have closer candidates on the edges
+# already and share `N` between calls. Return `(d2, r, u, v)`, with `r` from `X` to `X'`, `d2 = dot(r, r)`, and `u`
+# and `v` the weights of `B` and `C`.
+@inline function _tri_face_candidate(AX, E0, E1, N)
+    ia = inv(dot3(E0, E0))
+    c1 = dot3(E0, E1)*ia
+    # The weights of `B` and `C` at `X'`, clamped into the triangle, `v` first.
+    v = clamp01nan(-dot3(N, cross3(E0, AX))/dot3(N, N))
+    u = clamp01nan(fma(-v, c1, -dot3(E0, AX)*ia))
+    # A select, as `Base.min` also checks for NaN, which can't happen here.
+    w = one(u) - u
+    v = SIMD.vifelse(v < w, v, w)
+    r = fma3(v, E1, fma3(u, E0, AX))
+    dot3(r, r), r, u, v
 end
 
 #=
@@ -247,138 +256,121 @@ Between Line Segments" (Geometric Tools, 2018, revised 2023).
 end
 
 #=
-Given point O, ray vector D, and a triangle with points (A,B,C), test whether the ray intersects the triangle.
-If there is an intersection P. Then P can be represented as
+The closest points of a line segment `x` and a triangle are on an edge of
+the triangle, or are an end point of `x` over the face, or are where `x`
+crosses the face, at distance zero. If `x` is parallel to the face, sliding
+along it keeps the distance until an end point or an edge. So this takes the
+closest of six pairs of points: the closest points of `x` and each edge, the
+end points of `x` with their `X'` as for a point and a triangle, and the
+point of `x` where its line meets the plane of the triangle, with `s`
+clamped, with its `X'`. Each is a pair of points of the simplexes, so none is
+closer than the true distance, and `d2` is `dot(r, r)` of its own separation
+`r`, which does not cancel. An `X'` past an edge is some point of the
+triangle, and the edge pair is at least as close.
 
-    P = A + u(B-A) + v(C-A) = O + tD
+Testing whether `x` crosses the triangle instead, as Möller and Trumbore,
+"Fast, minimum storage ray-triangle intersection" (1997), decides the
+distance is zero from the signs of triple products, which are rounding
+errors when `x` is in the plane of the triangle. Then a line segment beside
+a triangle can get a distance of zero.
 
-If there is not an intersection, `t`, `u` and `v` are undefined.
+`s = N⋅(A - P0)/(N⋅P)`. The rounding of the dot products moves the point
+along `x` by about a rounding of `‖A - P0‖` or `s*‖P‖` over the sine of the
+angle between `x` and the plane, which moves it off the plane by just a
+rounding of those. A tilt of `N` by an angle `τ` moves the point off the
+plane by about `τ*‖X - A‖`, and so the distance at first order, unlike for a
+point. `cross3` tilts `N` by a rounding over the sine of the triangle's
+smallest angle, which for a line segment through a sliver gave errors near
+`√eps*ℓ`, so `N` is `cross3_accurate`, which tilts it by about a rounding.
+
+When `N⋅N` underflows the edges are within about `floatmin^(1/4)` of every
+point of the triangle, as for a point and a triangle. A line segment
+parallel to the plane gives NaN or infinite `s`, which `clamp01nan` makes an
+end point.
+
+For two triangles, the closest points are on an edge of each, or are a
+vertex of one over the face of the other, or are where an edge of one
+crosses the other. So that takes the closest of the pairs of edges, and of
+the vertices and the edges of each with the face of the other, in the same
+way.
 =#
-struct SegTriangleIntersectResult{Float}
-    intersect::Bool
-    t::Float
-    u::Float
-    v::Float
-end
-
-#=
-A fast ray-triangle intersection algorithm by Moller and Trumbore.
-Ref: Tomas Möller and Ben Trumbore, "Fast, minimum storage ray-triangle intersection" (1997) Journal of Graphics Tools.
-=#
-function moller_trumbore_intersect(o, d, a, b, c)
-    fzero = zero(eltype(o))
-    seg_triangle_no_intersect = SegTriangleIntersectResult(false, fzero, fzero, fzero)
-
-    rab = b - a
-    rac = c - a
-    cross_d_rac = cross3(d, rac)
-    det = dot3(cross_d_rac, rab)
-
-    if det == zero(det)
-        return seg_triangle_no_intersect
-    end
-
-    invdet = inv(det)
-    rao = o - a
-    u = dot3(cross_d_rac, rao) * invdet
-    if u < 0 || u > 1
-        return seg_triangle_no_intersect
-    end
-
-    cross_rao_rab = cross3(rao, rab)
-    v = dot3(cross_rao_rab, d) * invdet
-    if v < 0 || u + v > 1
-        return seg_triangle_no_intersect
-    end
-
-    t = dot3(cross_rao_rab, rac) * invdet
-    if t < 0 || t > 1
-        return seg_triangle_no_intersect
-    end
-
-    SegTriangleIntersectResult(true, t, u, v)
-end
-
 @inline function dist_sqr_r_s_t(x::LineSeg{T}, y::Triangle{T}) where T
-    fzero = zero(T)
-    o = x[1]
-    d = x[2] - x[1]
-    a = y[1]
-    b = y[2]
-    c = y[3]
-    result = moller_trumbore_intersect(o, d, a, b, c)
-    if result.intersect == true
-        fzero, zero(Vec3{T}), SA[result.t,], SA[result.u, result.v]
-    else
-        # no intersection or seg and triangle are parallel.
-        # min distance is on an edge of the triangle.
-        d2min, minr, mins, _tmin = dist_sqr_r_s_t(x,SA[a,b])
-        mint = SA[_tmin[1], fzero]
-        d2, _rmin, _smin, _tmin = dist_sqr_r_s_t(x,SA[b,c])
-        if  d2 < d2min
-            d2min = d2
-            minr = _rmin
-            mins = _smin
-            mint = SA[one(T) - _tmin[1], _tmin[1]]
-        end
-        d2, _rmin, _smin, _tmin = dist_sqr_r_s_t(x,SA[c,a])
-        if  d2 < d2min
-            d2min = d2
-            minr = _rmin
-            mins = _smin
-            mint = SA[fzero, one(T) - _tmin[1]]
-        end
-        d2, _rmin, _, _tri_tmin = dist_sqr_r_s_t(SA[x[1],],y)
-        if  d2 < d2min
-            d2min = d2
-            minr = _rmin
-            mins = SA[fzero]
-            mint = _tri_tmin
-        end
-        d2, _rmin, _, _tri_tmin = dist_sqr_r_s_t(SA[x[2],],y)
-        if  d2 < d2min
-            d2min = d2
-            minr = _rmin
-            mins = SA[one(T)]
-            mint = _tri_tmin
-        end
-        d2min, minr, mins, mint
+    A = y[1]
+    E0 = y[2] - A
+    E1 = y[3] - A
+    N = cross3_accurate(E0, E1)
+    z = zero(T)
+    # The closest points of `x` and the edges.
+    d2, r, s, t = dist_sqr_r_s_t(x, SA[y[1], y[2]])
+    best = (d2, r, s, SVector(t[1], z))
+    d2, r, s, t = dist_sqr_r_s_t(x, SA[y[1], y[3]])
+    best = _min_d2_r_s_t(best, (d2, r, s, SVector(z, t[1])))
+    d2, r, s, t = dist_sqr_r_s_t(x, SA[y[2], y[3]])
+    best = _min_d2_r_s_t(best, (d2, r, s, SVector(one(T) - t[1], t[1])))
+    # The end points of `x` with the face.
+    for i in 1:2
+        d2, r, u, v = _tri_face_candidate(A - x[i], E0, E1, N)
+        best = _min_d2_r_s_t(best, (d2, r, SVector(ifelse(i == 1, z, one(T))), SVector(u, v)))
     end
+    # Last, so a tie keeps an exact weight.
+    d2, r, s, u, v = _seg_tri_crossing_candidate(x[1], x[2], A, E0, E1, N)
+    _min_d2_r_s_t(best, (d2, r, SVector(s), SVector(u, v)))
+end
+
+# The point at `s` of the line segment from `P0` to `P1` where its line meets
+# the plane of the triangle with `y[1] = A`, `E0`, `E1`, and `N` about
+# `E0×E1`, with `s` clamped, and its `X'`. Return `(d2, r, s, u, v)`.
+@inline function _seg_tri_crossing_candidate(P0, P1, A, E0, E1, N)
+    P = P1 - P0
+    AP0 = A - P0
+    s = clamp01nan(dot3(N, AP0)/dot3(N, P))
+    d2, r, u, v = _tri_face_candidate(fma3(-s, P, AP0), E0, E1, N)
+    d2, r, s, u, v
+end
+
+# The weights of vertices 2 and 3 of a triangle at the point
+# `(1 - w)*V[i] + w*V[j]` on an edge, with `i < j`, or at `V[i]` with
+# `i == j` and `w = 0`.
+@inline function _tri_weights(i, j, w)
+    z = zero(w)
+    wi = one(w) - w
+    SVector(ifelse(i == 2, wi, ifelse(j == 2, w, z)), ifelse(i == 3, wi, ifelse(j == 3, w, z)))
 end
 
 @inline function dist_sqr_r_s_t(x::Triangle{T}, y::Triangle{T}) where T
-    fzero = zero(T)
-    fone = one(T)
-    d2, minr, _s, mint = @inline dist_sqr_r_s_t(SA[x[1],x[2]], y)
-    _s_all = SA[fzero, _s[1], fone - _s[1]]
-    mins = SA[_s_all[2], _s_all[1]]
-    iszero(d2) && return d2, minr, mins, mint
-    ai = 2
-    bi = 3
-    ci = 1
-    for i in 2:3
-        this_d2, _r, _s, _t = @inline dist_sqr_r_s_t(SA[x[ai],x[bi]], y)
-        if this_d2 < d2
-            d2 = this_d2
-            minr = _r
-            _s_all = SA[fzero, _s[1], fone - _s[1]]
-            mins = SA[_s_all[bi], _s_all[ai]]
-            mint = _t
-        end
-        iszero(d2) && return d2, minr, mins, mint
-        ai, bi, ci = bi, ci, ai
+    Ax = x[1]
+    E0x = x[2] - Ax
+    E1x = x[3] - Ax
+    Nx = cross3_accurate(E0x, E1x)
+    Ay = y[1]
+    E0y = y[2] - Ay
+    E1y = y[3] - Ay
+    Ny = cross3_accurate(E0y, E1y)
+    z = zero(T)
+    edges = ((1, 2), (1, 3), (2, 3))
+    # A pair of vertices, to start.
+    r = Ay - Ax
+    best = (dot3(r, r), r, SVector(z, z), SVector(z, z))
+    # The closest points of the pairs of edges.
+    for (i, j) in edges, (k, l) in edges
+        d2, r, s, t = dist_sqr_r_s_t(SA[x[i], x[j]], SA[y[k], y[l]])
+        best = _min_d2_r_s_t(best, (d2, r, _tri_weights(i, j, s[1]), _tri_weights(k, l, t[1])))
     end
-    for i in 1:3
-        this_d2, _r, _s, _t = @inline dist_sqr_r_s_t(SA[y[ai],y[bi]], x)
-        if this_d2 < d2
-            d2 = this_d2
-            minr = -_r
-            _s_all = SA[fzero, _s[1], fone - _s[1]]
-            mint = SA[_s_all[bi], _s_all[ai]]
-            mins = _t
-        end
-        iszero(d2) && return d2, minr, mins, mint
-        ai, bi, ci = bi, ci, ai
+    # The vertices of each with the face of the other.
+    for k in 1:3
+        d2, r, u, v = _tri_face_candidate(Ay - x[k], E0y, E1y, Ny)
+        best = _min_d2_r_s_t(best, (d2, r, _tri_weights(k, k, z), SVector(u, v)))
+        d2, r, u, v = _tri_face_candidate(Ax - y[k], E0x, E1x, Nx)
+        best = _min_d2_r_s_t(best, (d2, -r, SVector(u, v), _tri_weights(k, k, z)))
     end
-    return d2, minr, mins, mint
+    # Last, so a tie keeps an exact weight. The edges of each with the face
+    # of the other.
+    for (i, j) in edges
+        d2, r, s, u, v = _seg_tri_crossing_candidate(x[i], x[j], Ay, E0y, E1y, Ny)
+        best = _min_d2_r_s_t(best, (d2, r, _tri_weights(i, j, s), SVector(u, v)))
+        d2, r, s, u, v = _seg_tri_crossing_candidate(y[i], y[j], Ax, E0x, E1x, Nx)
+        best = _min_d2_r_s_t(best, (d2, -r, SVector(u, v), _tri_weights(i, j, s)))
+    end
+    best
 end
+

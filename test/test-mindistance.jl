@@ -33,7 +33,7 @@ end
 
 Random.seed!(1234)
 
-function distance_tests(as, bs; check_contact_points=true)
+function distance_tests(as, bs)
     for i in eachindex(as, bs)
         local a = as[i]
         local b = bs[i]
@@ -43,9 +43,7 @@ function distance_tests(as, bs; check_contact_points=true)
         @test r ⋅ r ≈ d2 atol = 1E-10 rtol = 1E-11
         local s_all = [one(eltype(s)) - sum(s); s;]
         local t_all = [one(eltype(t)) - sum(t); t;]
-        if check_contact_points || !iszero(d2)
-            @test norm(r - (sum(b .* t_all) - sum(a .* s_all))) ≤ 1E-12
-        end
+        @test norm(r - (sum(b .* t_all) - sum(a .* s_all))) ≤ 1E-12
         @test all(≥(0), s)
         @test all(≥(0), t)
         @test sum(s) ≤ 1
@@ -67,9 +65,7 @@ end
     pools = [rand(SVector{3,Float64}, 4) for _ in 1:trials]
     as = [SVector{N}(ntuple(_ -> rand(pool), N)) for pool in pools]
     bs = [SVector{M}(ntuple(_ -> rand(pool), M)) for pool in pools]
-    # `moller_trumbore_intersect` reports line segments in the plane of a
-    # triangle, such as its edges, as intersecting, with arbitrary `s` and `t`.
-    distance_tests(as, bs; check_contact_points = min(N, M) == 1 || max(N, M) < 3)
+    distance_tests(as, bs)
 end
 
 @testset "Float32 distance with shared vertices $N to $M" for N in 1:3, M in 1:3
@@ -206,6 +202,64 @@ end
             pb = (1 - big(t[1])) .* b[1] .+ big(t[1]) .* b[2]
             @test norm(r .- (pb .- pa)) ≤ tol
             @test abs(sqrt(d2) - norm(r)) ≤ tol
+        end
+    end
+end
+
+# Line segments in, or nearly in, the plane of a triangle beside it, and line
+# segments through the face of a sliver, and triangles with those as an edge.
+# Testing whether the line segment crosses the triangle, from the signs of
+# triple products that are rounding errors in the plane, gave a distance of
+# zero for line segments 1.7 from the triangle, about one time in 300. Through
+# a sliver, `N = E0×E1` from `cross3` tilted the plane enough for errors near
+# `√eps*ℓ`.
+@testset "$T line segments and triangles near the plane of a triangle" for T in (Float32, Float64)
+    rng = Random.Xoshiro(31)
+    # The case 1.7 apart.
+    cases = Any[(
+        SA[SA[0.27440169104786705, -1.8352000938383282, -1.1414620437379672], SA[-0.4237474034660068, -1.74076257090927, -0.005187092841748675]],
+        SA[SA[-0.051006641386534685, 0.8264827967799175, 0.247674370931405], SA[0.3840271906908225, 0.44295798307158735, -0.5669754202169636], SA[-0.3934509020879434, -0.08075321479510644, 0.491917584990893]],
+    )]
+    for trial in 1:3000
+        n = normalize(randn(rng, 3))
+        e1 = normalize(cross(n, randn(rng, 3)))
+        e2 = cross(n, e1)
+        o = randn(rng, 3)
+        P(a, b, c = 0) = o .+ a .* e1 .+ b .* e2 .+ c .* n
+        θ = rand(rng, (0.0, 10.0^(-rand(rng)*12)))
+        if isodd(trial)
+            # A unit triangle, and a line segment beside it, tilted out of the
+            # plane by about θ.
+            yt = (P(0, 0), P(1, 0), P(0, 1))
+            xt = (P(2 + rand(rng), -1 + 3rand(rng), -θ), P(-1 + 3rand(rng), 2 + rand(rng), θ))
+        else
+            # A sliver, and a line segment through its face.
+            yt = (P(0, 0), P(1, 0), P(0.5 + rand(rng), 10.0^(-rand(rng)*12)))
+            w = rand(rng, 3)
+            X = sum(w ./ sum(w) .* collect(yt))
+            d = normalize(randn(rng, 3))
+            a = rand(rng)
+            xt = (X .- a .* d, X .+ (1 - a) .* d)
+        end
+        x = SVector{2}(map(v -> SVector{3, T}(v), xt))
+        y = SVector{3}(map(v -> SVector{3, T}(v), yt))
+        # A triangle with `x` as an edge, its third vertex 1 or θ away.
+        c = SVector{3, T}(xt[1] .+ ifelse(rand(rng, Bool), 1, θ) .* normalize(randn(rng, 3)))
+        push!(cases, (x, y), (SA[x[1], x[2], c], y))
+    end
+    for (x, y) in cases
+        x = map(v -> SVector{3, T}(v), x)
+        y = map(v -> SVector{3, T}(v), y)
+        tol = 64*eps(T)*maximum(v -> maximum(abs, v), (x..., y...))
+        for (a, b) in ((x, y), (y, x))
+            ref = sqrt(dist_sqr(map(v -> big.(v), a), map(v -> big.(v), b)))
+            d2, r, s, t = dist_sqr_r_s_t(a, b)
+            @test abs(sqrt(d2) - ref) ≤ tol
+            @test all(≥(0), s) && all(≥(0), t) && sum(s) ≤ 1 && sum(t) ≤ 1
+            # `r` is the separation of the points the weights give.
+            pa = (1 - sum(big.(s))) .* a[1] .+ sum(big.(s) .* a[2:end])
+            pb = (1 - sum(big.(t))) .* b[1] .+ sum(big.(t) .* b[2:end])
+            @test norm(r .- (pb .- pa)) ≤ tol
         end
     end
 end
@@ -380,7 +434,7 @@ end
 # The grid neighbor list checks distances several pairs at a time, which
 # must give bit identical results to the scalar version.
 @testset "dist_sqr on SIMD lanes $T $N to $M" for T in (Float32, Float64),
-        (N, M) in ((1, 1), (1, 2), (2, 1), (1, 3), (3, 1), (2, 2))
+        (N, M) in ((1, 1), (1, 2), (2, 1), (1, 3), (3, 1), (2, 2), (2, 3), (3, 2), (3, 3))
     W = 8
     for trial in 1:500
         as = ntuple(_ -> rand_simplex(T, N), Val(W))
