@@ -23,8 +23,8 @@ What a `dist_sqr_r_s_t` method must do to be correct, for an element type `T`
 (or `SIMD.Vec` lanes of it). Here `d` is the exact distance between the
 simplexes as given, in `T`, and `ℓ` is the largest absolute coordinate.
 
-For finite coordinates below about `floatmax(T)^(1/4)` (4e9 in `Float32`,
-1e77 in `Float64`):
+For finite coordinates below `(floatmax(T)^(1/4))/4` (1e9 in `Float32`,
+3e76 in `Float64`):
 
 1. The result is finite: never `NaN` or `Inf`, even for degenerate simplexes
    (repeated vertices, zero length edges, collinear triangles).
