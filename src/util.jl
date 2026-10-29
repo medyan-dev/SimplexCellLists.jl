@@ -30,31 +30,6 @@ Also works on `SVector{3, SIMD.Vec{N,T}}`, bit identical to the scalar version i
 end
 
 """
-    cross3_accurate(a::Vec3, b::Vec3)
-
-Return the cross product of two 3D vectors, each component accurate to about
-one rounding, using Kahan's algorithm for `p*q - u*v` with fused multiply adds.
-
-[`cross3`](@ref) is cheaper, but for nearly parallel `a` and `b` its
-components cancel, with an error of about a rounding of `norm(a)*norm(b)`.
-
-Also works on `SVector{3, SIMD.Vec{N,T}}`, bit identical to the scalar version in each lane.
-"""
-@inline function cross3_accurate(a::Vec3, b::Vec3)
-    SVector(
-        _det2_accurate(a[2], b[3], a[3], b[2]),
-        _det2_accurate(a[3], b[1], a[1], b[3]),
-        _det2_accurate(a[1], b[2], a[2], b[1]),
-    )
-end
-
-# `p*q - u*v`, with the rounding of `u*v` recovered by a fused multiply add.
-@inline function _det2_accurate(p, q, u, v)
-    uv = u*v
-    fma(p, q, -uv) + fma(-u, v, uv)
-end
-
-"""
     scale3(t, v::Vec3)
     scale3(v::Vec3, t)
 
