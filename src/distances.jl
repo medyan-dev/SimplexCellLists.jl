@@ -31,7 +31,7 @@ For finite coordinates below `(floatmax(T)^(1/4))/4` (1e9 in `Float32`,
    `sum(t)` are at most one.
 3. `d²` is computed from `r` alone, the same way in every method:
    `fma(r[3], r[3], fma(r[2], r[2], r[1]*r[1]))`.
-4. `|√d² - d| ≤ 8*eps(T)*ℓ + floatmin(T)^(1/4)`.
+4. `|√d² - d| ≤ 64*eps(T)*ℓ + floatmin(T)^(1/4)`.
 5. With `X(s)` and `Y(t)` the points the weights give, computed exactly,
    `‖r - (Y(t) - X(s))‖` is within the same bound.
 
