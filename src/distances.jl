@@ -177,28 +177,45 @@ the triangle, and then the edges are exact or within the length of the edge.
 end
 
 #=
-The line segments lie in parallel planes with normal `n = P×Q`. If their
-projections onto one of these planes cross, the closest points are at the
-crossing and the separation is along `n`. Otherwise the closest points are
-an end point of one line segment and its closest point on the other.
+The separation between the points at `s` on `x` and `t` on `y` is
+`Q0mP0 + t*Q - s*P`. Rather than test where the closest points are, this
+takes the closest of three pairs of points: the closest points on `y` of the
+end points of `x`, and the closest point on `x` of the point at `t` on `y`,
+with `t` from the closest points of the lines through the line segments,
+clamped. Each is a pair of points of the line segments, so none is closer
+than the true distance, `d2` is `dot(r, r)` of its own separation `r`, which
+does not cancel, and `r` is the separation of the points the weights give.
 
-This avoids expanding the squared distance as a quadratic in the parameters,
-which cancels: its absolute error scales with the squared length of the line
-segments, not with the distance. Here the distance at a crossing is along
-`n`, and each end point candidate is `dot(r, r)` of its own separation `r`,
-so the error of the distance is about a rounding of the coordinates. `n` is
-from `cross3_accurate`: with `cross3`, the error of the distance between
-nearly parallel line segments grows like one over the angle between them.
+With `t` clamped to zero or one, `s` is the closest point on `x` of an end
+point of `y`, so those pairs need no candidates of their own. So if the
+closest points have `s` at an end of `x`, an end point candidate has them,
+and otherwise the pair from `t` does.
 
-The nearest points of the lines through the line segments are from Kahan,
-"Computing Cross-Products and Rotations in 2- and 3-Dimensional Euclidean
-Spaces" (2016), §9: the separation is along `n = P×Q`, and the parameters
-are triple products over `|n|²` (Lagrange's identity), not the Gram
-determinant `a*c - b*b` of Lumelsky (1985) and Ericson, "Real-Time
-Collision Detection" (2005), §5.1.9, which cancels for nearly parallel line
-segments. `n` is computed with Kahan's algorithm for 2×2 determinants
-(Higham, "Accuracy and Stability of Numerical Algorithms", 2002, Problem
-2.27; bound 2u from Jeannerod, Louvet, Muller, Math. Comp. 82, 2013).
+`t = -n⋅(P×Q0mP0)/(n⋅n)` with `n = P×Q` is a triple product over `‖n‖²`
+(Lagrange's identity), as in Kahan, "Computing Cross-Products and Rotations
+in 2- and 3-Dimensional Euclidean Spaces" (2016), §9. Unlike the Gram
+determinant `a*c - b*b` of Lumelsky (1985) and Ericson, "Real-Time Collision
+Detection" (2005), §5.1.9, it doesn't cancel for nearly parallel line
+segments. The rounding of `P×Q0mP0` moves `t` by about a rounding of
+`‖Q0mP0‖` over `‖Q‖*sinθ`, which moves the point on `y` by about a rounding
+of `‖Q0mP0‖` across the line through `x`. If that moves its closest point on
+`x` off an end, the end point there is within as much of `y`. The rounding
+of `n` is about a rounding of `‖P‖*‖Q‖`. Along `n` it only scales `t`, which
+moves the point on `y` across the line through `x` by at most about a
+rounding of `‖Q‖`. In the plane it moves that point by about a rounding of
+the height over `sinθ`, which adds to the distance in second order. That is
+at most `‖Q‖*sinθ` too, as the point stays on `y`, and the smaller of the
+two adds at most about a rounding of `‖Q‖`.
+
+`n⋅n` and `n⋅(P×Q0mP0)` are at most fourth powers of the coordinates, so
+they are in range. When `n⋅n` underflows, `‖P‖*‖Q‖*sinθ` is below about
+`floatmin^(1/2)`, so `y` is shorter than about `floatmin^(1/4)`, or `x` is
+within that of a line segment parallel to `y`. For parallel line segments
+any `t` will do: if an end point of `x` is closest, an end point candidate
+has it, and otherwise all of `y` is beside `x`. Zero length or parallel line
+segments give NaN or infinite parameters, which `clamp01nan` makes points of
+the line segments.
+
 For a different robust method see Eberly, "Robust Computation of Distance
 Between Line Segments" (Geometric Tools, 2018, revised 2023).
 =#
@@ -209,44 +226,24 @@ Between Line Segments" (Geometric Tools, 2018, revised 2023).
     Q = y[2] - Q0
     # Written as `y - x[1]` so it folds to `Q0` when `x[1]` is positive zero.
     Q0mP0 = Q0 - P0
-    a = dot3(P, P)
     b = dot3(P, Q)
     c = dot3(Q, Q)
-    d = dot3(P, Q0mP0)
     e = dot3(Q, Q0mP0)
-    n = cross3_accurate(P, Q)
-    Δ = dot3(n, n)
-    invΔ = inv(Δ)
-    # The closest points of the lines through the line segments, by
-    # Lagrange's identity, without the cancellation in `a*c - b*b`.
-    sbar = dot3(n, cross3(Q0mP0, Q))*invΔ
-    tbar = dot3(n, cross3(Q0mP0, P))*invΔ
-    # False for NaN, from parallel or zero length line segments.
-    inside = (zero(T) ≤ sbar) & (sbar ≤ one(T)) & (zero(T) ≤ tbar) & (tbar ≤ one(T))
-    hn = dot3(Q0mP0, n)
-    # `hn*invΔ` first: `hn ≈ d*‖n‖` can be near the square root of floatmax
-    # when `hn*hn` would overflow, while `hn*invΔ ≈ d/‖n‖` stays in range.
-    hninvΔ = hn*invΔ
-    rin = scale3(hninvΔ, n)
-    d2in = hninvΔ*hn
-    inva = inv(a)
-    invc = inv(c)
-    # The closest points on `x` of the end points of `y`, and on `y` of the
-    # end points of `x`. The separation between the points at `s` on `x` and
-    # `t` on `y` is `Q0mP0 + t*Q - s*P`.
-    s0 = clamp01nan(d*inva)
-    s1 = clamp01nan((b+d)*inva)
-    t0 = clamp01nan(-e*invc)
-    t1 = clamp01nan((b-e)*invc)
-    rs0 = Q0mP0 - scale3(s0, P)
-    best = (dot3(rs0, rs0), rs0, s0, zero(T))
-    rs1 = (Q0mP0 + Q) - scale3(s1, P)
-    best = _min_d2_r_s_t(best, (dot3(rs1, rs1), rs1, s1, one(T)))
-    rt0 = Q0mP0 + scale3(t0, Q)
-    best = _min_d2_r_s_t(best, (dot3(rt0, rt0), rt0, zero(T), t0))
-    rt1 = (Q0mP0 - P) + scale3(t1, Q)
-    best = _min_d2_r_s_t(best, (dot3(rt1, rt1), rt1, one(T), t1))
-    d2, r, s, t = _select_d2_r_s_t(inside, (d2in, rin, sbar, tbar), best)
+    n = cross3(P, Q)
+    # `t` of the closest points of the lines through the line segments,
+    # clamped, and the closest point on `x` of the point at `t` on `y`.
+    t = clamp01nan(-dot3(n, cross3(P, Q0mP0))/dot3(n, n))
+    s = clamp01nan(fma(t, b, dot3(P, Q0mP0))/dot3(P, P))
+    rin = fma3(-s, P, fma3(t, Q, Q0mP0))
+    # The closest points on `y` of the end points of `x`.
+    t0 = clamp01nan(-e/c)
+    r0 = fma3(t0, Q, Q0mP0)
+    best = (dot3(r0, r0), r0, zero(T), t0)
+    t1 = clamp01nan((b - e)/c)
+    r1 = fma3(t1, Q, Q0mP0 - P)
+    best = _min_d2_r_s_t(best, (dot3(r1, r1), r1, one(T), t1))
+    # Last, so a tie with an end point keeps its exact weight.
+    d2, r, s, t = _min_d2_r_s_t(best, (dot3(rin, rin), rin, s, t))
     d2, r, SVector{1,T}(s), SVector{1,T}(t)
 end
 

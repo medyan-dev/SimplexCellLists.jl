@@ -158,6 +158,58 @@ end
     end
 end
 
+# Line segments on nearly the same line, or nearly parallel. For collinear
+# segments to within rounding, `n = P×Q` and `Q0mP0×Q` were both rounding
+# errors, so `sbar` and `tbar` were arbitrary, the inside test could pass,
+# and the distance between disjoint segments 0.56 apart came out as 3e-8.
+# Nearly parallel overlapping segments got the distance right, but with
+# weights giving points far apart. Integer coordinates miss this, as an
+# exactly collinear `n` is zero.
+@testset "$T nearly collinear and nearly parallel line segments" for T in (Float32, Float64)
+    rng = Random.Xoshiro(29)
+    # The case 0.56 apart, kept since the random ones below fail it only
+    # about once in 700 for the old method.
+    cases = Any[(
+        SA[SA[-1.1168967f0, -0.4735017f0, -0.30628234f0], SA[-0.43016562f0, 0.06529092f0, -0.054257788f0]],
+        SA[SA[0.96934664f0, 1.1633145f0, 0.45935148f0], SA[-0.007197912f0, 0.39714116f0, 0.10096781f0]],
+    )]
+    for trial in 1:10000
+        q = normalize(randn(rng, 3))
+        e1 = normalize(cross(q, randn(rng, 3)))
+        e2 = cross(q, e1)
+        o = randn(rng, 3)
+        if isodd(trial)
+            # Four points on a line, with offsets below a rounding or a few.
+            ts = randn(rng, 4)
+            pts = [o .+ t .* q .+ rand(rng, (0, 0.1, 4)) * eps(T) .* (randn(rng)*e1 .+ randn(rng)*e2) for t in ts]
+            xt, yt = (pts[1], pts[2]), (pts[3], pts[4])
+        else
+            # Nearly parallel, offset along the line and across it.
+            θ = 10.0^(-rand(rng)*12)
+            dq = cos(θ)*q .+ sin(θ)*e1
+            c = o .+ 2randn(rng)*q .+ 10.0^(-rand(rng)*6)*randn(rng)*e2
+            xt = (o .- q, o .+ q)
+            yt = (c .- exp(randn(rng)) .* dq, c .+ exp(randn(rng)) .* dq)
+        end
+        push!(cases, (SVector{2}(map(v -> SVector{3, T}(v), xt)), SVector{2}(map(v -> SVector{3, T}(v), yt))))
+    end
+    for (x, y) in cases
+        x = map(v -> SVector{3, T}(v), x)
+        y = map(v -> SVector{3, T}(v), y)
+        tol = 64*eps(T)*maximum(v -> maximum(abs, v), (x..., y...))
+        for (a, b) in ((x, y), (y, x))
+            ref = sqrt(dist_sqr(map(v -> big.(v), a), map(v -> big.(v), b)))
+            d2, r, s, t = dist_sqr_r_s_t(a, b)
+            @test abs(sqrt(d2) - ref) ≤ tol
+            # `r` is the separation of the points the weights give.
+            pa = (1 - big(s[1])) .* a[1] .+ big(s[1]) .* a[2]
+            pb = (1 - big(t[1])) .* b[1] .+ big(t[1]) .* b[2]
+            @test norm(r .- (pb .- pa)) ≤ tol
+            @test abs(sqrt(d2) - norm(r)) ≤ tol
+        end
+    end
+end
+
 # Worst-case accuracy points ported from error-analysis/ledger.jl. Each case
 # pins one branch domain (or branch boundary) of a distance kernel at the
 # ledger's sharpest known input, with the ledger's first-order claim
@@ -251,16 +303,16 @@ const ledger_cases = [
 end
 
 # Small or thin simplexes, where a squared length, or a squared area like
-# `Δ = |n|²` in the line-line method, is out of range. When something
-# underflows the distance may lose accuracy, but it must stay finite and off
-# by at most about `floatmin^(1/4)`, which bounds the inradius of a triangle
-# with `Δ` below `floatmin`. The point-triangle method used to form `Δ`, and
-# returned `Inf` for a point over the face when `inv(Δ)` overflowed, or `NaN`
-# in the plane, even for a unit sliver. When `Δ` underflows the line-line
-# method skips the crossing, and when `‖r‖²` is subnormal the point-line
-# quotient for `t` keeps only a few bits, but both are within the floor.
-# Nearly parallel unit line segments do not reach this: their end points are
-# within about ℓ·sinθ of the crossing.
+# `Δ = |n|²`, is out of range. When something underflows the distance may
+# lose accuracy, but it must stay finite and off by at most about
+# `floatmin^(1/4)`, which bounds the inradius of a triangle with `Δ` below
+# `floatmin`. The point-triangle method used to form `inv(Δ)`, and returned
+# `Inf` for a point over the face when it overflowed, or `NaN` in the plane,
+# even for a unit sliver. When `Δ` underflows the line-line `t` is arbitrary,
+# and when `‖r‖²` is subnormal the point-line quotient for `t` keeps only a
+# few bits, but both are within the floor. Nearly parallel unit line
+# segments do not reach this: their end points are within about ℓ·sinθ of
+# the crossing.
 const tiny_normal_cases = [
     ("point-triangle, tiny, inv(Δ) overflows", Float32,
         ((0.25e-10, 0.25e-10, 1e-10),), ((0, 0, 0), (1e-10, 0, 0), (0, 1e-10, 0))),
