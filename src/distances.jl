@@ -56,8 +56,7 @@ Return the minimum squared distance between two simplexes.
 This is the `d²` of [`dist_sqr_r_s_t`](@ref), bit for bit.
 """
 @inline function dist_sqr(x::Simplex{N, T}, y::Simplex{M, T}) where {T, N, M}
-    # Inlining even the large methods lets LLVM drop the unused `r, s, t`.
-    d2, r, s, t = @inline dist_sqr_r_s_t(x, y)
+    d2, r, s, t = dist_sqr_r_s_t(x, y)
     d2
 end
 
@@ -300,7 +299,7 @@ function moller_trumbore_intersect(o, d, a, b, c)
     SegTriangleIntersectResult(true, t, u, v)
 end
 
-function dist_sqr_r_s_t(x::LineSeg{T}, y::Triangle{T}) where T
+@inline function dist_sqr_r_s_t(x::LineSeg{T}, y::Triangle{T}) where T
     fzero = zero(T)
     o = x[1]
     d = x[2] - x[1]
@@ -347,7 +346,7 @@ function dist_sqr_r_s_t(x::LineSeg{T}, y::Triangle{T}) where T
     end
 end
 
-function dist_sqr_r_s_t(x::Triangle{T}, y::Triangle{T}) where T
+@inline function dist_sqr_r_s_t(x::Triangle{T}, y::Triangle{T}) where T
     fzero = zero(T)
     fone = one(T)
     d2, minr, _s, mint = @inline dist_sqr_r_s_t(SA[x[1],x[2]], y)
