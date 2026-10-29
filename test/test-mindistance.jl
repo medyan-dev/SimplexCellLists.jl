@@ -210,16 +210,16 @@ end
     end
 end
 
-# Worst-case accuracy points ported from error-analysis/ledger.jl. Each case
-# pins one branch domain (or branch boundary) of a distance kernel at the
-# ledger's sharpest known input, with the ledger's first-order claim
-# |√d̂² - d| ≤ u·bound(exact sizes), u = eps(T)/2, evaluated at the point and
-# rounded up ~1.3x as margin for how the sizes drift under the noise below.
+# Worst-case accuracy points. Each case pins one branch domain (or branch
+# boundary) of a distance kernel at the sharpest known input, with a
+# first-order error bound |√d̂² - d| ≤ u·bound(exact sizes), u = eps(T)/2,
+# evaluated at the point and rounded up ~1.3x as margin for how the sizes
+# drift under the noise below.
 # Each point is tested as given, then with Gaussian coordinate noise of a few
 # ulps: enough to scramble every rounding, and at the boundary points to make
 # the branch actually flip (their tolerance is the traced all-domain bound,
 # which includes the branch jump terms).
-const ledger_cases = [
+const worst_case_points = [
     # point-point: 5u/2·d, attained when one coordinate carries the separation.
     ("point-point, one coordinate separation", 7.0,
         ((-1.0, 0.03, -0.02),), ((1.0, 0.06, 0.03),)),
@@ -288,7 +288,7 @@ const ledger_cases = [
         ((-0.4, -0.3, 0.0), (0.56, 0.42, 0.0)), ((-0.52, -0.39, 0.25), (-0.82, 0.01, 0.25))),
 ]
 
-@testset "ledger worst-case point: $name" for (name, tolu, xt, yt) in ledger_cases
+@testset "worst-case point: $name" for (name, tolu, xt, yt) in worst_case_points
     rng = Random.Xoshiro(2026)
     for T in (Float32, Float64)
         tol = tolu*eps(T)/2

@@ -44,7 +44,7 @@ much.
 Above `floatmax(T)^(1/4)` anything goes. The methods must also be branch
 free, with each `SIMD.Vec` lane bit identical to the scalar method.
 
-`tiny_normal_cases` and the ledger cases in test/test-mindistance.jl check
+`tiny_normal_cases` and `worst_case_points` in test/test-mindistance.jl check
 this at the edges of the range and at the worst case points.
 =#
 
