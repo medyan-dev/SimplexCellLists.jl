@@ -1,9 +1,7 @@
-# Defines `pos` and `inputs` for a triangulated sphere membrane.
+# Defines `pos` and `inputs` for a triangulated sphere surface.
 using LinearAlgebra
 using SimplexCellLists
 using StaticArrays
-
-# `icosphere_mesh` and `sphere_slerp` are copied from MEDYAN.jl `src/membrane/make_memb_sphere.jl`
 
 """
     icosphere_mesh(divisions::Int) -> (verts::Vector{SVector{3,Float64}}, faces::Vector{SVector{3,Int}})
@@ -135,8 +133,8 @@ function sphere_slerp(p, q, t)
     c*(p + q)/a + s*(q - p)/b
 end
 
-# A membrane is added to the neighbor lists the same way as in MEDYAN.jl:
-# its triangles, its edges as triangle lines, and its vertices as triangle points.
+# The surface is added to the neighbor lists as its triangles,
+# its edges as triangle lines, and its vertices as triangle points.
 sphere_radius = 1000.0 # nm
 divisions = 40 # edges about 26 nm long
 verts, faces = icosphere_mesh(divisions)
@@ -146,7 +144,7 @@ edges = sort!(unique!([minmax(f[k], f[mod1(k+1, 3)]) for f in faces for k in 1:3
 triangle_lines = [LineIdxPart(u, v) for (u, v) in edges]
 triangle_points = [PointIdxPart(i) for i in eachindex(pos)]
 
-radius = 10.0f0 # MEDYAN default membrane `radius_collide`
+radius = 10.0f0
 skin = 7.0f0
 stiffness = 500.0f0
 
