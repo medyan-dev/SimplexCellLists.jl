@@ -249,10 +249,10 @@ end
         end
     end
 
-    @testset "Filaments" begin
-        # Random walk filaments of points, clines, and triangles, like a
-        # simulation, optionally excluding bonded neighbors.
-        function filament_inputs(rng, n_beads; exclude_bonded, skin)
+    @testset "Chains" begin
+        # Random walk chains of points, clines, and triangles, like a
+        # simulation, optionally excluding adjacent neighbors.
+        function chain_inputs(rng, n_beads; exclude_adjacent, skin)
             L = 50
             box = (n_beads / 0.5)^(1/3)
             pos = SVector{3, Float32}[]
@@ -272,7 +272,7 @@ end
                 end
             end
             no_collide_pairs = empty_no_collide_pairs()
-            if exclude_bonded
+            if exclude_adjacent
                 for i in 1:length(points) - 1
                     push!(no_collide_pairs[Int(SimplexCellLists.CollidePoint_Point)], UInt32(i) => UInt32(i + 1))
                 end
@@ -290,8 +290,8 @@ end
             pos, inputs
         end
         rng = Xoshiro(7)
-        for exclude_bonded in (false, true), skin in (0.0f0, 0.1f0), trial in 1:3
-            test_grid_matches_sweep(filament_inputs(rng, 1000; exclude_bonded, skin)...)
+        for exclude_adjacent in (false, true), skin in (0.0f0, 0.1f0), trial in 1:3
+            test_grid_matches_sweep(chain_inputs(rng, 1000; exclude_adjacent, skin)...)
         end
     end
 

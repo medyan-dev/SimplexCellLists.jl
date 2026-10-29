@@ -1,4 +1,4 @@
-# Defines `pos` and `inputs` for the ring of filaments.
+# Defines `pos` and `inputs` for the ring of line segment chains.
 using SimplexCellLists
 using StaticArrays
 
@@ -32,7 +32,7 @@ radius = 3.0f0
 skin = 7.0f0
 stiffness = 500.0f0
 
-# Exclude bonded pairs: consecutive clines that share a merged point
+# Exclude adjacent pairs: consecutive clines that share a merged point
 no_collide_pairs = empty_no_collide_pairs()
 for k in 1:length(clines)-1
     if clines[k].i + UInt32(1) == clines[k+1].i
