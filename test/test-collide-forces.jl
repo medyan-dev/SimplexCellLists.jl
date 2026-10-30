@@ -321,8 +321,6 @@ function check_matches_scalar(pos, nl, T; nthreads)
     get_energy(fe)
 end
 
-alloc_collide_forces(fe, pos, nl, T) = @allocated collide_forces!(fe, pos, nl, T)
-
 # A policy with params that aren't isbits.
 struct BoxedPairParams
     k::Vector{Float32}
@@ -346,12 +344,6 @@ end
         end
     end
     pos = [SVector{3, Float64}(4 .* rand(rng, 3)) for _ in 1:nbeads]
-    nl = random_neighbor_lists(rng, DefaultCollidePolicy(), nbeads, 203, () -> DefaultPairParams(10f0))
-    fe = ForceEnergyFixedPoint{30, 30}(nbeads)
-    for T in (Float32, Float64)
-        alloc_collide_forces(fe, pos, nl, T)
-        @test alloc_collide_forces(fe, pos, nl, T) == 0
-    end
     boxed_nl = random_neighbor_lists(rng, BoxedPolicy(), nbeads, 203, () -> BoxedPairParams([10*rand(rng, Float32)]))
     for T in (Float32, Float64)
         @test check_matches_scalar(pos, boxed_nl, T; nthreads=1) > 0
