@@ -86,8 +86,11 @@ end
     pq = p*q
     # `1/(p*q)`, or zero when a line segment has zero length, or is so short
     # that the inverse would overflow. Such a line segment has no direction,
-    # so it is taken as parallel to the other, the limit as its length goes
-    # to zero, with no force from the switchover.
+    # so it is taken as parallel to the other, which is the limit of the
+    # energy as its length goes to zero. The force from the switchover has no
+    # such limit: the gradient of the switchover along the short line segment
+    # stays about `‖Q‖*sin²θ*switchover_scale`, so the force depends on its
+    # direction. Here that force is zero.
     ipq = _vifelse(pq > floatmin(T), inv(pq), zero(T))
     # Smoothly switch from 0 for parallel lines to exactly 1 for x ≥ 3, where
     # x = Δ/(p*q)*switchover_scale, with continuous first and second
