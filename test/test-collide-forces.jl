@@ -201,6 +201,17 @@ end
     end
 end
 
+@testset "$T parallel diagonal line segments" for T in (Float32, Float64)
+    # `P×P` with `cross3` is a rounding residual, not zero, which switched
+    # over in `Float32` and gave about 21% too little force.
+    positions = [SA[0.0, 0.0, 0.0], SA[100.1, 100.1, 0.0], SA[0.0, 0.0, 1e-6], SA[100.1, 100.1, 1e-6]]
+    edge = NeighborListEdge(LineIdxPart(1, 2), LineIdxPart(3, 4), 2f-6, DefaultPairParams(1f0))
+    fe = ForceEnergyFloat64(length(positions))
+    nl_edge_forces!(fe, positions, edge, DefaultCollidePolicy(), T)
+    @test get_energy(fe) ≈ 1e-12 rtol=1e-4
+    @test get_force(fe) ≈ [SA[0, 0, -1e-6], SA[0, 0, -1e-6], SA[0, 0, 1e-6], SA[0, 0, 1e-6]] rtol=1e-4
+end
+
 @testset "collide_forces! integration" begin
     policy = DefaultCollidePolicy()
     # 3×3×4 grid, spacing 0.4: with radius 0.3 overlaps are guaranteed, but

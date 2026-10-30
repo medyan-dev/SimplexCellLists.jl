@@ -58,8 +58,9 @@ end
     d = dot3(P, Q0mP0)
     e = dot3(Q, Q0mP0)
     # `‖P×Q‖^2`, which doesn't cancel for nearly parallel line segments like
-    # `a*c - b*b` does, and is the `n` of `dist_sqr_r_s_t`.
-    n = cross3(P, Q)
+    # `a*c - b*b` does. `cross3_accurate`, as the rounding of `cross3` is
+    # about `eps*p*q`, which would switch over parallel line segments.
+    n = cross3_accurate(P, Q)
     Δ = dot3(n, n)
     # The closest points on `y` of the end points of `x`, the end point
     # candidates of `dist_sqr_r_s_t`, and the closest points on `x` of the end
