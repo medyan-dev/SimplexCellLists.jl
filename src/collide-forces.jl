@@ -57,7 +57,10 @@ end
     c = dot3(Q, Q)
     d = dot3(P, Q0mP0)
     e = dot3(Q, Q0mP0)
-    Δ = a*c - b*b
+    # `‖P×Q‖^2`, which doesn't cancel for nearly parallel line segments like
+    # `a*c - b*b` does, and is the `n` of `dist_sqr_r_s_t`.
+    n = cross3(P, Q)
+    Δ = dot3(n, n)
     inva = inv(a)
     invc = inv(c)
     # The boundary critical points, as in `dist_sqr_r_s_t`
@@ -78,24 +81,33 @@ end
     fq1other = fq1s0 + fq1s1 + fq1t0 + fq1t1
 
     switchover_scale = T(policy.switchover_scale_unitless)*inv(L)^2 # units of 1/length^2
+    p = _sqrt_fast(a)
+    q = _sqrt_fast(c)
+    pq = p*q
+    # `1/(p*q)`, or zero when a line segment has zero length, or is so short
+    # that the inverse would overflow. Such a line segment has no direction,
+    # so it is taken as parallel to the other, the limit as its length goes
+    # to zero, with no force from the switchover.
+    ipq = _vifelse(pq > floatmin(T), inv(pq), zero(T))
     # Smoothly switch from 0 for parallel lines to exactly 1 for x ≥ 3, where
-    # x = Δ/sqrt(a*c)*switchover_scale, with continuous first and second
+    # x = Δ/(p*q)*switchover_scale, with continuous first and second
     # derivatives: switchover = 1 - (1 - x/3)^3 for x < 3.
-    w = relu(1 - Δ/_sqrt_fast(a*c)*switchover_scale*T(1//3))
+    w = relu(1 - Δ*ipq*switchover_scale*T(1//3))
     switchover = 1 - w^3
     d_switchover = w^2 # derivative of switchover with respect to x
     u = switchover*ucl + T(1//2)*(1-switchover)*uother
-    p = _sqrt_fast(a)
-    q = _sqrt_fast(c)
-    g = b/(p*q)
+    g = b*ipq
+    # `1 + g^2` gives `q/p + b*g/a = c/(p*q)*(1 + g^2)` and
+    # `p/q + b*g/c = a/(p*q)*(1 + g^2)` with no other divisions.
+    h = 1 + g^2
     uswitched = (ucl + -T(1//2)*uother)
     fp1 = switchover*fp1cl + T(1//2)*(1-switchover)*fp1other
-    d_switchover_dp1 = -switchover_scale*d_switchover*((q/p+b*g/a)*P - 2*g*Q)
+    d_switchover_dp1 = -switchover_scale*d_switchover*((c*ipq*h)*P - 2*g*Q)
     fp1 += d_switchover_dp1*uswitched
 
     fq0 = switchover*fq0cl + T(1//2)*(1-switchover)*fq0other
     fq1 = switchover*fq1cl + T(1//2)*(1-switchover)*fq1other
-    d_switchover_dq0 = switchover_scale*d_switchover*((p/q+b*g/c)*Q - 2*g*P)
+    d_switchover_dq0 = switchover_scale*d_switchover*((a*ipq*h)*Q - 2*g*P)
     d_switchover_dq1 = - d_switchover_dq0
     fq0 += d_switchover_dq0*uswitched
     fq1 += d_switchover_dq1*uswitched
