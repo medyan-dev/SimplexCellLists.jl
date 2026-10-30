@@ -96,22 +96,25 @@ end
     # Smoothly switch from 0 for parallel lines to exactly 1 for x ≥ 3, where
     # x = Δ/(p*q)*switchover_scale, with continuous first and second
     # derivatives: switchover = 1 - (1 - x/3)^3 for x < 3.
-    w = relu(1 - Δ*ipq*switchover_scale*T(1//3))
+    Δipq = Δ*ipq
+    w = relu(1 - Δipq*switchover_scale*T(1//3))
     switchover = 1 - w^3
     d_switchover = w^2 # derivative of switchover with respect to x
     u = switchover*ucl + T(1//2)*(1-switchover)*uother
-    g = b*ipq
-    # `1 + g^2` gives `q/p + b*g/a = c/(p*q)*(1 + g^2)` and
-    # `p/q + b*g/c = a/(p*q)*(1 + g^2)` with no other divisions.
-    h = 1 + g^2
+    # The gradients of `Δ/(p*q)` are `(2*Q×n - Δ/a*P)/(p*q)` for `P` and
+    # `(2*n×P - Δ/c*Q)/(p*q)` for `Q`. Both terms are `O(‖n‖)`, so they are
+    # exactly zero for parallel line segments. The expanded
+    # `2*(c*P - b*Q) = 2*Q×n` cancels to a rounding of `‖Q‖*‖P‖`. `Δipq*ipq`
+    # is `sin²θ`, which doesn't overflow like `ipq^2` can.
+    sin2 = Δipq*ipq
     uswitched = (ucl + -T(1//2)*uother)
     fp1 = switchover*fp1cl + T(1//2)*(1-switchover)*fp1other
-    d_switchover_dp1 = -switchover_scale*d_switchover*((c*ipq*h)*P - 2*g*Q)
+    d_switchover_dp1 = scale3(-switchover_scale*d_switchover, fma3(-sin2*(c*ipq), P, scale3(2*ipq, cross3(Q, n))))
     fp1 += d_switchover_dp1*uswitched
 
     fq0 = switchover*fq0cl + T(1//2)*(1-switchover)*fq0other
     fq1 = switchover*fq1cl + T(1//2)*(1-switchover)*fq1other
-    d_switchover_dq0 = switchover_scale*d_switchover*((a*ipq*h)*Q - 2*g*P)
+    d_switchover_dq0 = scale3(switchover_scale*d_switchover, fma3(-sin2*(a*ipq), Q, scale3(2*ipq, cross3(n, P))))
     d_switchover_dq1 = - d_switchover_dq0
     fq0 += d_switchover_dq0*uswitched
     fq1 += d_switchover_dq1*uswitched

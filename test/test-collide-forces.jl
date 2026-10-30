@@ -212,6 +212,24 @@ end
     @test get_force(fe) ≈ [SA[0, 0, -1e-6], SA[0, 0, -1e-6], SA[0, 0, 1e-6], SA[0, 0, 1e-6]] rtol=1e-4
 end
 
+@testset "$T no force along parallel line segments" for T in (Float32, Float64)
+    # The line segments are parallel and separated along z, so the forces
+    # must point along z. The switchover gradient written as `c*P - b*Q`
+    # cancels to a rounding of `‖P‖*‖Q‖` even when `P×Q` is zero, which gave
+    # a force of 3.8e-6 along the line segments, in y, in `Float32`, larger
+    # than the 1e-6 force along z that pushes them apart.
+    for (Q1, f) in (
+            (SA[3.0, 26.0, 1e-6], [-1, -1, 1, 1]*1e-6),
+            (SA[6.0, 52.0, 1e-6], [-1, -0.5, 1.25, 0.25]*1e-6),
+        )
+        positions = [SA[0.0, 0.0, 0.0], SA[3.0, 26.0, 0.0], SA[0.0, 0.0, 1e-6], Q1]
+        edge = NeighborListEdge(LineIdxPart(1, 2), LineIdxPart(3, 4), 2f-6, DefaultPairParams(1f0))
+        fe = ForceEnergyFloat64(length(positions))
+        nl_edge_forces!(fe, positions, edge, DefaultCollidePolicy(), T)
+        @test get_force(fe) ≈ [SA[0, 0, fz] for fz in f] rtol=1e-4
+    end
+end
+
 @testset "collide_forces! integration" begin
     policy = DefaultCollidePolicy()
     # 3×3×4 grid, spacing 0.4: with radius 0.3 overlaps are guaranteed, but
