@@ -1,5 +1,6 @@
 using Test
 using StaticArrays
+using Random: Xoshiro, randperm
 using Rotations: RotMatrix
 using SimplexCellLists
 using SimplexCellLists: dist_sqr, nl_edge_forces!, NeighborListEdge
@@ -177,6 +178,58 @@ end
     end
 end
 
+@testset "Float32 deep overlap of large simplexes" begin
+    # The force laws use `d2` from `dist_sqr_r_s_t` as is, so it must stay
+    # accurate in `Float32` when the simplexes are much larger than their
+    # separation, here 0.01.
+    x = SA[1.0, 0.0, 0.0]
+    y = SA[0.0, 1.0, 0.0]
+    z = SA[0.0, 0.0, 1.0]
+    w = x/2 + sqrt(3)/2*y
+    for (positions, a, b) in (
+            ([-37x, 63x, 0.01z - 41w, 0.01z + 59w], LineIdxPart(1, 2), LineIdxPart(3, 4)),
+            ([0.01z + 3x + 2y, -23x - 7y, 31x - 9y, 2x + 27y], PointIdxPart(1), TriangleIdxPart(2, 3, 4)),
+        )
+        edge = NeighborListEdge(a, b, 6f0, DefaultPairParams(10f0))
+        fe32 = ForceEnergyFloat64(length(positions))
+        nl_edge_forces!(fe32, positions, edge, DefaultCollidePolicy(), Float32)
+        fe64 = ForceEnergyFloat64(length(positions))
+        nl_edge_forces!(fe64, positions, edge, DefaultCollidePolicy(), Float64)
+        @test all(f -> all(isfinite, f), get_force(fe32))
+        @test get_energy(fe32) ≈ get_energy(fe64) rtol=1e-4
+        @test flat_force(fe32) ≈ flat_force(fe64) rtol=1e-3
+    end
+end
+
+@testset "$T parallel diagonal line segments" for T in (Float32, Float64)
+    # `P×P` with `cross3` is a rounding residual, not zero, which switched
+    # over in `Float32` and gave about 21% too little force.
+    positions = [SA[0.0, 0.0, 0.0], SA[100.1, 100.1, 0.0], SA[0.0, 0.0, 1e-6], SA[100.1, 100.1, 1e-6]]
+    edge = NeighborListEdge(LineIdxPart(1, 2), LineIdxPart(3, 4), 2f-6, DefaultPairParams(1f0))
+    fe = ForceEnergyFloat64(length(positions))
+    nl_edge_forces!(fe, positions, edge, DefaultCollidePolicy(), T)
+    @test get_energy(fe) ≈ 1e-12 rtol=1e-4
+    @test get_force(fe) ≈ [SA[0, 0, -1e-6], SA[0, 0, -1e-6], SA[0, 0, 1e-6], SA[0, 0, 1e-6]] rtol=1e-4
+end
+
+@testset "$T no force along parallel line segments" for T in (Float32, Float64)
+    # The line segments are parallel and separated along z, so the forces
+    # must point along z. The switchover gradient written as `c*P - b*Q`
+    # cancels to a rounding of `‖P‖*‖Q‖` even when `P×Q` is zero, which gave
+    # a force of 3.8e-6 along the line segments, in y, in `Float32`, larger
+    # than the 1e-6 force along z that pushes them apart.
+    for (Q1, f) in (
+            (SA[3.0, 26.0, 1e-6], [-1, -1, 1, 1]*1e-6),
+            (SA[6.0, 52.0, 1e-6], [-1, -0.5, 1.25, 0.25]*1e-6),
+        )
+        positions = [SA[0.0, 0.0, 0.0], SA[3.0, 26.0, 0.0], SA[0.0, 0.0, 1e-6], Q1]
+        edge = NeighborListEdge(LineIdxPart(1, 2), LineIdxPart(3, 4), 2f-6, DefaultPairParams(1f0))
+        fe = ForceEnergyFloat64(length(positions))
+        nl_edge_forces!(fe, positions, edge, DefaultCollidePolicy(), T)
+        @test get_force(fe) ≈ [SA[0, 0, fz] for fz in f] rtol=1e-4
+    end
+end
+
 @testset "collide_forces! integration" begin
     policy = DefaultCollidePolicy()
     # 3×3×4 grid, spacing 0.4: with radius 0.3 overlaps are guaranteed, but
@@ -219,6 +272,12 @@ end
     @test get_energy(fe_manual) == get_energy(fe)
     @test get_force(fe_manual) == get_force(fe)
 
+    # the scalar fallback works for other calc types
+    fe_big = DebugForceEnergy{BigFloat}(length(positions))
+    collide_forces!(fe_big, positions, nl, BigFloat)
+    @test get_energy(fe_big) ≈ get_energy(fe)
+    @test get_force(fe_big) ≈ get_force(fe)
+
     # the chunked path visits every edge exactly once
     for nthreads in (1, 2, 3, 7, 100)
         local fe_chunked = ForceEnergyFloat64(length(positions))
@@ -237,5 +296,75 @@ end
     end
     @test iszero(get_energy(fe_empty))
     @test all(iszero, get_force(fe_empty))
+end
+
+const NL_FIELDS = (:PPNL, :PCNL, :PLNL, :PTNL, :CCNL, :CLNL, :LLNL)
+
+make_part(::Type{PointIdxPart}, v) = PointIdxPart(v[1])
+make_part(::Type{CLineIdxPart}, v) = CLineIdxPart(v[1])
+make_part(::Type{LineIdxPart}, v) = LineIdxPart(v[1], v[2])
+make_part(::Type{TriangleIdxPart}, v) = TriangleIdxPart(v[1], v[2], v[3])
+
+# `nedges` edges of every type between random beads, with no bead shared by
+# the two simplexes of an edge.
+function random_neighbor_lists(rng, policy, nbeads, nedges, make_params)
+    nl = NeighborLists(policy)
+    for f in NL_FIELDS
+        list = getfield(nl, f)
+        A = fieldtype(eltype(list), :a)
+        B = fieldtype(eltype(list), :b)
+        for _ in 1:nedges
+            # Odd beads, so the second bead of a `CLineIdxPart` isn't used
+            # by another part.
+            v = UInt32.(2 .* randperm(rng, nbeads ÷ 2)[1:6] .- 1)
+            push!(list, NeighborListEdge(make_part(A, v[1:3]), make_part(B, v[4:6]), 3*rand(rng, Float32), make_params()))
+        end
+    end
+    nl
+end
+
+# Check that `collide_forces!` gives exactly the forces and energy of the
+# scalar path, and return the energy.
+function check_matches_scalar(pos, nl, T; nthreads)
+    fe = ForceEnergyFloat64(length(pos))
+    fe_scalar = ForceEnergyFloat64(length(pos))
+    for chunk in 1:nthreads
+        collide_forces!(fe, pos, nl, T; chunk, nthreads)
+        for f in NL_FIELDS
+            SimplexCellLists.nl_forces_scalar!(fe_scalar, pos, getfield(nl, f), nl.policy, T, chunk, nthreads)
+        end
+    end
+    @test get_energy(fe) == get_energy(fe_scalar)
+    @test get_force(fe) == get_force(fe_scalar)
+    get_energy(fe)
+end
+
+# A policy with params that aren't isbits.
+struct BoxedPairParams
+    k::Vector{Float32}
+end
+struct BoxedPolicy <: SimplexCellLists.CollidePolicy{DefaultObjectParams, BoxedPairParams} end
+@inline function SimplexCellLists.nl_edge_force(::BoxedPolicy, x, y, drst, L, params::BoxedPairParams)
+    SimplexCellLists.nl_edge_force(DefaultCollidePolicy(), x, y, drst, L, DefaultPairParams(params.k[1]))
+end
+
+@testset "vectorized path matches the scalar path" begin
+    rng = Xoshiro(1234)
+    nbeads = 300
+    # No group, one group, and several flushes with a last group and edges
+    # left over.
+    for P in (Float64, Float32), nedges in (0, 5, 8, 203)
+        pos = [SVector{3, P}(4 .* rand(rng, 3)) for _ in 1:nbeads]
+        nl = random_neighbor_lists(rng, DefaultCollidePolicy(), nbeads, nedges, () -> DefaultPairParams(10*rand(rng, Float32)))
+        for T in (Float32, Float64), nthreads in (1, 3)
+            E = check_matches_scalar(pos, nl, T; nthreads)
+            nedges == 203 && @test E > 0
+        end
+    end
+    pos = [SVector{3, Float64}(4 .* rand(rng, 3)) for _ in 1:nbeads]
+    boxed_nl = random_neighbor_lists(rng, BoxedPolicy(), nbeads, 203, () -> BoxedPairParams([10*rand(rng, Float32)]))
+    for T in (Float32, Float64)
+        @test check_matches_scalar(pos, boxed_nl, T; nthreads=1) > 0
+    end
 end
 nothing
