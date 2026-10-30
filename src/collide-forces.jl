@@ -61,20 +61,20 @@ end
     # `a*c - b*b` does, and is the `n` of `dist_sqr_r_s_t`.
     n = cross3(P, Q)
     Δ = dot3(n, n)
-    inva = inv(a)
-    invc = inv(c)
-    # The boundary critical points, as in `dist_sqr_r_s_t`
-    s0 = clamp01nan(d*inva)
-    s1 = clamp01nan((b+d)*inva)
-    t0 = clamp01nan(-e*invc)
-    t1 = clamp01nan((b-e)*invc)
+    # The closest points on `y` of the end points of `x`, the end point
+    # candidates of `dist_sqr_r_s_t`, and the closest points on `x` of the end
+    # points of `y`, its `s` at `t = 0` and `t = 1`.
+    s0 = clamp01nan(d/a)
+    s1 = clamp01nan((b + d)/a)
+    t0 = clamp01nan(-e/c)
+    t1 = clamp01nan((b - e)/c)
     ucl, fp1cl, fq0cl, fq1cl = _line_line_u_f(L, s[1], t[1], r)
     # The separation between the points at `s` on `x` and `t` on `y` is
     # `Q0mP0 + t*Q - s*P`.
-    us0, fp1s0, fq0s0, fq1s0 = _line_line_u_f(L, s0, zero(T), Q0mP0 - scale3(s0, P))
-    us1, fp1s1, fq0s1, fq1s1 = _line_line_u_f(L, s1, one(T), (y[2] - x[1]) - scale3(s1, P))
-    ut0, fp1t0, fq0t0, fq1t0 = _line_line_u_f(L, zero(T), t0, Q0mP0 + scale3(t0, Q))
-    ut1, fp1t1, fq0t1, fq1t1 = _line_line_u_f(L, one(T), t1, (Q0mP0 - P) + scale3(t1, Q))
+    us0, fp1s0, fq0s0, fq1s0 = _line_line_u_f(L, s0, zero(T), fma3(-s0, P, Q0mP0))
+    us1, fp1s1, fq0s1, fq1s1 = _line_line_u_f(L, s1, one(T), fma3(-s1, P, y[2] - x[1]))
+    ut0, fp1t0, fq0t0, fq1t0 = _line_line_u_f(L, zero(T), t0, fma3(t0, Q, Q0mP0))
+    ut1, fp1t1, fq0t1, fq1t1 = _line_line_u_f(L, one(T), t1, fma3(t1, Q, Q0mP0 - P))
     uother = us0 + us1 + ut0 + ut1
     fp1other = fp1s0 + fp1s1 + fp1t0 + fp1t1
     fq0other = fq0s0 + fq0s1 + fq0t0 + fq0t1
