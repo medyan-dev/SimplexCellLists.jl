@@ -1,5 +1,6 @@
 using Test
 using StaticArrays
+using Random: Xoshiro, randperm
 using Rotations: RotMatrix
 using SimplexCellLists
 using SimplexCellLists: dist_sqr, nl_edge_forces!, NeighborListEdge
@@ -266,5 +267,83 @@ end
     end
     @test iszero(get_energy(fe_empty))
     @test all(iszero, get_force(fe_empty))
+end
+
+const NL_FIELDS = (:PPNL, :PCNL, :PLNL, :PTNL, :CCNL, :CLNL, :LLNL)
+
+make_part(::Type{PointIdxPart}, v) = PointIdxPart(v[1])
+make_part(::Type{CLineIdxPart}, v) = CLineIdxPart(v[1])
+make_part(::Type{LineIdxPart}, v) = LineIdxPart(v[1], v[2])
+make_part(::Type{TriangleIdxPart}, v) = TriangleIdxPart(v[1], v[2], v[3])
+
+# `nedges` edges of every type between random beads, with no bead shared by
+# the two simplexes of an edge.
+function random_neighbor_lists(rng, policy, nbeads, nedges, make_params)
+    nl = NeighborLists(policy)
+    for f in NL_FIELDS
+        list = getfield(nl, f)
+        A = fieldtype(eltype(list), :a)
+        B = fieldtype(eltype(list), :b)
+        for _ in 1:nedges
+            # Odd beads, so the second bead of a `CLineIdxPart` isn't used
+            # by another part.
+            v = UInt32.(2 .* randperm(rng, nbeads ÷ 2)[1:6] .- 1)
+            push!(list, NeighborListEdge(make_part(A, v[1:3]), make_part(B, v[4:6]), 3*rand(rng, Float32), make_params()))
+        end
+    end
+    nl
+end
+
+# Check that `collide_forces!` gives exactly the forces and energy of the
+# scalar path, and return the energy.
+function check_matches_scalar(pos, nl, T; nthreads)
+    fe = ForceEnergyFloat64(length(pos))
+    fe_scalar = ForceEnergyFloat64(length(pos))
+    for chunk in 1:nthreads
+        collide_forces!(fe, pos, nl, T; chunk, nthreads)
+        for f in NL_FIELDS
+            SimplexCellLists.nl_forces_scalar!(fe_scalar, pos, getfield(nl, f), nl.policy, T, chunk, nthreads)
+        end
+    end
+    @test get_energy(fe) == get_energy(fe_scalar)
+    @test get_force(fe) == get_force(fe_scalar)
+    get_energy(fe)
+end
+
+alloc_collide_forces(fe, pos, nl, T) = @allocated collide_forces!(fe, pos, nl, T)
+
+# A policy with params that aren't isbits.
+struct BoxedPairParams
+    k::Vector{Float32}
+end
+struct BoxedPolicy <: SimplexCellLists.CollidePolicy{DefaultObjectParams, BoxedPairParams} end
+@inline function SimplexCellLists.nl_edge_force(::BoxedPolicy, x, y, drst, L, params::BoxedPairParams)
+    SimplexCellLists.nl_edge_force(DefaultCollidePolicy(), x, y, drst, L, DefaultPairParams(params.k[1]))
+end
+
+@testset "vectorized path matches the scalar path" begin
+    rng = Xoshiro(1234)
+    nbeads = 300
+    # No group, one group, and several flushes with a last group and edges
+    # left over.
+    for P in (Float64, Float32), nedges in (0, 5, 8, 203)
+        pos = [SVector{3, P}(4 .* rand(rng, 3)) for _ in 1:nbeads]
+        nl = random_neighbor_lists(rng, DefaultCollidePolicy(), nbeads, nedges, () -> DefaultPairParams(10*rand(rng, Float32)))
+        for T in (Float32, Float64), nthreads in (1, 3)
+            E = check_matches_scalar(pos, nl, T; nthreads)
+            nedges == 203 && @test E > 0
+        end
+    end
+    pos = [SVector{3, Float64}(4 .* rand(rng, 3)) for _ in 1:nbeads]
+    nl = random_neighbor_lists(rng, DefaultCollidePolicy(), nbeads, 203, () -> DefaultPairParams(10f0))
+    fe = ForceEnergyFixedPoint{30, 30}(nbeads)
+    for T in (Float32, Float64)
+        alloc_collide_forces(fe, pos, nl, T)
+        @test alloc_collide_forces(fe, pos, nl, T) == 0
+    end
+    boxed_nl = random_neighbor_lists(rng, BoxedPolicy(), nbeads, 203, () -> BoxedPairParams([10*rand(rng, Float32)]))
+    for T in (Float32, Float64)
+        @test check_matches_scalar(pos, boxed_nl, T; nthreads=1) > 0
+    end
 end
 nothing

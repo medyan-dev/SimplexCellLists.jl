@@ -41,7 +41,9 @@ for (name, sys, pos) in systems
             (ForceEnergyFloat64, Float64),
         )
         local fe = FE(length(pos))
+        # Positions in the calculation type.
+        local pos_calc = map(p -> SimplexCellLists.Vec3{calc_type}(p), pos)
         print("  collide_forces! $FE $calc_type:")
-        display(@b (zero_force_energy!($fe); collide_forces!($fe, $pos, $nl, $calc_type)) seconds=2)
+        display(@b (zero_force_energy!($fe); collide_forces!($fe, $pos_calc, $nl, $calc_type)) seconds=2)
     end
 end
