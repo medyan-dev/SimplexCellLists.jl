@@ -7,8 +7,8 @@ Return a tuple `(d², r, s, t)` of:
 3. `s`: the barycentric coordinates of that point on `x`.
 4. `t`: the barycentric coordinates of that point on `y`.
 
-These are computed in floating point, so they are approximate, as described
-under Accuracy below.
+For floating point coordinates these are approximate, as described under
+Accuracy below. For `Rational{BigInt}` coordinates they are exact, which is useful as a reference.
 
 `s` holds the barycentric weights of vertices `x[2:N]`; the weight of `x[1]`
 is implied as `1 - sum(s)`, so the point on `x` is:
@@ -108,6 +108,18 @@ end
 # Ties keep the earlier minimum. A NaN `d2` is kept, so a NaN coordinate gives a NaN `d2`.
 @inline _min_d2_r_s_t(best, cand) = _select_d2_r_s_t((cand[1] < best[1]) | isnan(cand[1]), cand, best)
 
+# A weight `num/den` clamped to `[0, 1]`. With floats, a degenerate simplex
+# gives a NaN or infinite quotient, which `clamp01nan` makes a point of the
+# simplex. Exact types such as `Rational` throw on `0//0` instead, so that is
+# zero, which is a point of the simplex too.
+@inline _clamp01_div(num, den) = clamp01nan(num/den)
+@inline _clamp01_div(num::Rational, den::Rational) = iszero(den) ? zero(num) : clamp(num/den, zero(num), one(num))
+
+# `inv(x)`, but zero for an exact zero `x` of a type such as `Rational`,
+# where `0*inv(0)` throws instead of giving NaN.
+@inline _inv0(x) = inv(x)
+@inline _inv0(x::Rational) = iszero(x) ? x : inv(x)
+
 # The methods
 
 @inline function dist_sqr_r_s_t(x::Point{T}, y::Point{T}) where T
@@ -119,7 +131,7 @@ end
     r = y[2] - y[1]
     # Written as `y - x[1]` so it folds to `y[1]` when `x[1]` is positive zero.
     p = y[1] - x[1]
-    t = clamp01nan(-dot3(p, r)/dot3(r, r))
+    t = _clamp01_div(-dot3(p, r), dot3(r, r))
     d = fma3(t, r, p)
     dot3(d, d), d, SVector{0,T}(), SVector{1,T}(t)
 end
@@ -172,12 +184,12 @@ the triangle, and then the edges are exact or within the length of the edge.
     AX = A - x[1]
     d2in, rin, u, v = _tri_face_candidate(AX, E0, E1, cross3(E0, E1))
     # The closest points on the edges `AC` and `BC`.
-    u1 = clamp01nan(-dot3(E1, AX)/dot3(E1, E1))
+    u1 = _clamp01_div(-dot3(E1, AX), dot3(E1, E1))
     r1 = fma3(u1, E1, AX)
     best = (dot3(r1, r1), r1, zero(T), u1)
     E2 = E1 - E0
     BX = AX + E0
-    u2 = clamp01nan(-dot3(BX, E2)/dot3(E2, E2))
+    u2 = _clamp01_div(-dot3(BX, E2), dot3(E2, E2))
     r2 = fma3(u2, E2, BX)
     best = _min_d2_r_s_t(best, (dot3(r2, r2), r2, one(T) - u2, u2))
     # Last, so a tie with an edge keeps the edge's exact zero weight.
@@ -192,10 +204,10 @@ end
 # already and share `N` between calls. Return `(d2, r, u, v)`, with `r` from `X` to `X'`, `d2 = dot(r, r)`, and `u`
 # and `v` the weights of `B` and `C`.
 @inline function _tri_face_candidate(AX, E0, E1, N)
-    ia = inv(dot3(E0, E0))
+    ia = _inv0(dot3(E0, E0))
     c1 = dot3(E0, E1)*ia
     # The weights of `B` and `C` at `X'`, clamped into the triangle, `v` first.
-    v = clamp01nan(-dot3(N, cross3(E0, AX))/dot3(N, N))
+    v = _clamp01_div(-dot3(N, cross3(E0, AX)), dot3(N, N))
     u = clamp01nan(fma(-v, c1, -dot3(E0, AX)*ia))
     # A select, as `Base.min` also checks for NaN, which can't happen here.
     w = one(u) - u
@@ -260,14 +272,14 @@ Between Line Segments" (Geometric Tools, 2018, revised 2023).
     n = cross3(P, Q)
     # `t` of the closest points of the lines through the line segments,
     # clamped, and the closest point on `x` of the point at `t` on `y`.
-    t = clamp01nan(-dot3(n, cross3(P, Q0mP0))/dot3(n, n))
-    s = clamp01nan(fma(t, b, dot3(P, Q0mP0))/dot3(P, P))
+    t = _clamp01_div(-dot3(n, cross3(P, Q0mP0)), dot3(n, n))
+    s = _clamp01_div(fma(t, b, dot3(P, Q0mP0)), dot3(P, P))
     rin = fma3(-s, P, fma3(t, Q, Q0mP0))
     # The closest points on `y` of the end points of `x`.
-    t0 = clamp01nan(-e/c)
+    t0 = _clamp01_div(-e, c)
     r0 = fma3(t0, Q, Q0mP0)
     best = (dot3(r0, r0), r0, zero(T), t0)
-    t1 = clamp01nan((b - e)/c)
+    t1 = _clamp01_div(b - e, c)
     r1 = fma3(t1, Q, Q0mP0 - P)
     best = _min_d2_r_s_t(best, (dot3(r1, r1), r1, one(T), t1))
     # Last, so a tie with an end point keeps its exact weight.
@@ -343,7 +355,7 @@ end
 @inline function _seg_tri_crossing_candidate(P0, P1, A, E0, E1, N)
     P = P1 - P0
     AP0 = A - P0
-    s = clamp01nan(dot3(N, AP0)/dot3(N, P))
+    s = _clamp01_div(dot3(N, AP0), dot3(N, P))
     d2, r, u, v = _tri_face_candidate(fma3(-s, P, AP0), E0, E1, N)
     d2, r, s, u, v
 end

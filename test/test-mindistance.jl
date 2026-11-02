@@ -79,6 +79,40 @@ end
     end
 end
 
+# With `Rational{BigInt}` coordinates nothing is rounded, so the results
+# should be exact. This checks that `d2` is exactly the minimum squared
+# distance, without a reference solver.
+#
+# Let `X` and `Y` be the points on `a` and `b` that the weights `s` and `t`
+# give, and `r = Y - X`. Take the plane through `X` and the plane through `Y`,
+# both perpendicular to `r`; they are `‖r‖` apart. If every vertex `p` of `a`
+# has `(p - X)⋅r ≤ 0`, all of `a` is on the far side of the first plane, as
+# its points are weighted averages of its vertices. If every vertex `q` of `b`
+# has `(q - Y)⋅r ≥ 0`, all of `b` is on the far side of the second plane. Then
+# no pair of points is closer than `‖r‖`, so `d2 = r⋅r` is the minimum. A
+# correct result always passes: if `(p - X)⋅r > 0`, moving `X` a little
+# toward `p` would bring it closer to `Y`.
+#
+# The vertices come from a small pool on a coarse grid, so the simplexes are
+# often degenerate, coplanar or parallel.
+@testset "Rational{BigInt} exact distance $N to $M" for N in 1:3, M in 1:3
+    for trial in 1:300
+        pool = [SVector{3, Rational{BigInt}}(rand(-2:2, 3) .// rand(1:2, 3)) for _ in 1:5]
+        a = SVector{N}(ntuple(_ -> rand(pool), N))
+        b = SVector{M}(ntuple(_ -> rand(pool), M))
+        d2, r, s, t = dist_sqr_r_s_t(a, b)
+        X = sum(a .* [1 - sum(s); s;])
+        Y = sum(b .* [1 - sum(t); t;])
+        @test r == Y - X
+        @test d2 == r ⋅ r
+        @test d2 == dist_sqr(a, b)
+        @test all(p -> (p - X) ⋅ r ≤ 0, a)
+        @test all(q -> (q - Y) ⋅ r ≥ 0, b)
+        @test all(w -> 0 ≤ w ≤ 1, s) && sum(s) ≤ 1
+        @test all(w -> 0 ≤ w ≤ 1, t) && sum(t) ≤ 1
+    end
+end
+
 @testset "line to triangle edge case" begin
     a = SA[
         SA[0.7962602087717146, 0.7678176789137129, 0.33365738129157096], 
