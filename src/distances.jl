@@ -219,28 +219,51 @@ end
 #=
 The separation between the points at `s` on `x` and `t` on `y` is
 `Q0mP0 + t*Q - s*P`. Rather than test where the closest points are, this
-takes the closest of three pairs of points: the closest points on `y` of the
-end points of `x`, and the closest point on `x` of the point at `t` on `y`,
-with `t` from the closest points of the lines through the line segments,
-clamped. Each is a pair of points of the line segments, so none is closer
-than the true distance, `d2` is `dot(r, r)` of its own separation `r`, which
-does not cancel, and `r` is the separation of the points the weights give.
+clamps and reprojects, as in Ericson, "Real-Time Collision Detection"
+(2005), §5.1.9, but with `t` first: `t` from the closest points of the lines
+through the line segments, clamped, then `s` of the closest point on `x` of
+the point at `t` on `y`, clamped, then `t` of the closest point on `y` of
+the point at `s` on `x`, clamped. That is a pair of points of the line
+segments, so it is not closer than the true distance, `d2` is `dot(r, r)` of
+its own separation `r`, which does not cancel, and `r` is the separation of
+the points the weights give.
 
-With `t` clamped to zero or one, `s` is the closest point on `x` of an end
-point of `y`, so those pairs need no candidates of their own. So if the
-closest points have `s` at an end of `x`, an end point candidate has them,
-and otherwise the pair from `t` does.
+Why this pair is the closest pair of the line segments:
+
+The proof uses one fact twice. Move a point along a line, and take its
+distance to a fixed line or line segment. That distance is a convex function
+of the point's position, so its minimum over `[0, 1]` is at its
+unconstrained minimizer clamped to `[0, 1]`.
+
+Step 1, the first `t`. Extend `x` and `y` to the whole lines through them,
+so `t` can be any number. The distance from the point at `t` on the line
+through `y` to the line through `x` is smallest at the `t` of the closest
+points of the two lines. The first `t` is that `t` clamped, so among `t` in
+`[0, 1]`, it gives the smallest distance to the line through `x`. Let `X1`
+be the point on the line through `x` closest to the point at the first `t`.
+Then these two points are the closest pair between `y` and the whole line
+through `x`. If the lines are parallel, the distance is the same for every
+`t`, so any first `t` works.
+
+Step 2, the first `s`. Move a point along the line through `x`, and take its
+distance to `y`. By step 1 it is smallest at `X1`. The first `s` is the `s`
+of `X1` clamped, so among `s` in `[0, 1]`, it gives the smallest distance
+to `y`.
+
+Step 3, the last `t`. It is the closest point on `y` to the point at the
+first `s`. By step 2, no point of `x` is closer to `y`, so this pair is the
+closest pair of the line segments.
 
 `t = -n⋅(P×Q0mP0)/(n⋅n)` with `n = P×Q` is a triple product over `‖n‖²`
 (Lagrange's identity), as in Kahan, "Computing Cross-Products and Rotations
 in 2- and 3-Dimensional Euclidean Spaces" (2016), §9. Unlike the Gram
-determinant `a*c - b*b` of Lumelsky (1985) and Ericson, "Real-Time Collision
-Detection" (2005), §5.1.9, it doesn't cancel for nearly parallel line
-segments. The rounding of `P×Q0mP0` moves `t` by about a rounding of
-`‖Q0mP0‖` over `‖Q‖*sinθ`, which moves the point on `y` by about a rounding
-of `‖Q0mP0‖` across the line through `x`. If that moves its closest point on
-`x` off an end, the end point there is within as much of `y`. The rounding
-of `n` is about a rounding of `‖P‖*‖Q‖`. Along `n` it only scales `t`, which
+determinant `a*c - b*b` of Lumelsky (1985) and Ericson, it doesn't cancel
+for nearly parallel line segments. The rounding of `P×Q0mP0` moves `t` by
+about a rounding of `‖Q0mP0‖` over `‖Q‖*sinθ`, which moves the point on `y`
+by about a rounding of `‖Q0mP0‖` across the line through `x`. If that moves
+its closest point on `x` off an end, the end point there is within as much
+of `y`, and the last `t` is its closest point on `y`. The rounding of `n` is
+about a rounding of `‖P‖*‖Q‖`. Along `n` it only scales `t`, which
 moves the point on `y` across the line through `x` by at most about a
 rounding of `‖Q‖`. In the plane it moves that point by about a rounding of
 the height over `sinθ`, which adds to the distance in second order. That is
@@ -250,11 +273,24 @@ two adds at most about a rounding of `‖Q‖`.
 `n⋅n` and `n⋅(P×Q0mP0)` are at most fourth powers of the coordinates, so
 they are in range. When `n⋅n` underflows, `‖P‖*‖Q‖*sinθ` is below about
 `floatmin^(1/2)`, so `y` is shorter than about `floatmin^(1/4)`, or `x` is
-within that of a line segment parallel to `y`. For parallel line segments
-any `t` will do: if an end point of `x` is closest, an end point candidate
-has it, and otherwise all of `y` is beside `x`. Zero length or parallel line
-segments give NaN or infinite parameters, which `clamp01nan` makes points of
-the line segments.
+within that of a line segment parallel to `y`, where any first `t` will do,
+as above. Zero length or parallel
+line segments give NaN or infinite parameters, which `clamp01nan` makes
+points of the line segments.
+
+The same steps by Gram-Schmidt, with `R = Q0mP0`, are:
+
+    a, b, c, d, e = dot3(P, P), dot3(P, Q), dot3(Q, Q), dot3(P, R), dot3(Q, R)
+    ia = inv(a); aq, ar = b*ia, d*ia
+    Qp, Rp = fma3(-aq, P, Q), fma3(-ar, P, R)
+    t = clamp01nan(-dot3(Qp, Rp)/dot3(Qp, Qp))
+    s = clamp01nan(fma(t, aq, ar))
+    t = clamp01nan(fma(s, b, -e)/c)
+
+`Qp` and `Rp` are `Q` and `R` without their parts along `P`. That has only
+second powers of the coordinates and is as accurate, but `inv(a)` is then on
+the way to `t`, so two divides are in a row. On SIMD lanes it was about 20%
+slower than the cross products, in both throughput and latency.
 
 For a different robust method see Eberly, "Robust Computation of Distance
 Between Line Segments" (Geometric Tools, 2018, revised 2023).
@@ -266,25 +302,22 @@ Between Line Segments" (Geometric Tools, 2018, revised 2023).
     Q = y[2] - Q0
     # Written as `y - x[1]` so it folds to `Q0` when `x[1]` is positive zero.
     Q0mP0 = Q0 - P0
+    a = dot3(P, P)
     b = dot3(P, Q)
     c = dot3(Q, Q)
     e = dot3(Q, Q0mP0)
     n = cross3(P, Q)
+    # Reciprocals, so their divides run beside `t`'s, not after it.
+    ia = _inv0(a)
+    ic = _inv0(c)
     # `t` of the closest points of the lines through the line segments,
-    # clamped, and the closest point on `x` of the point at `t` on `y`.
+    # clamped, the closest point on `x` of the point at `t` on `y`, clamped,
+    # and the closest point on `y` of the point at `s` on `x`, clamped.
     t = _clamp01_div(-dot3(n, cross3(P, Q0mP0)), dot3(n, n))
-    s = _clamp01_div(fma(t, b, dot3(P, Q0mP0)), dot3(P, P))
-    rin = fma3(-s, P, fma3(t, Q, Q0mP0))
-    # The closest points on `y` of the end points of `x`.
-    t0 = _clamp01_div(-e, c)
-    r0 = fma3(t0, Q, Q0mP0)
-    best = (dot3(r0, r0), r0, zero(T), t0)
-    t1 = _clamp01_div(b - e, c)
-    r1 = fma3(t1, Q, Q0mP0 - P)
-    best = _min_d2_r_s_t(best, (dot3(r1, r1), r1, one(T), t1))
-    # Last, so a tie with an end point keeps its exact weight.
-    d2, r, s, t = _min_d2_r_s_t(best, (dot3(rin, rin), rin, s, t))
-    d2, r, SVector{1,T}(s), SVector{1,T}(t)
+    s = clamp01nan(fma(t, b, dot3(P, Q0mP0))*ia)
+    t = clamp01nan(fma(s, b, -e)*ic)
+    r = fma3(-s, P, fma3(t, Q, Q0mP0))
+    dot3(r, r), r, SVector{1,T}(s), SVector{1,T}(t)
 end
 
 #=

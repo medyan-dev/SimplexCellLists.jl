@@ -62,9 +62,8 @@ end
     # about `eps*p*q`, which would switch over parallel line segments.
     n = cross3_accurate(P, Q)
     Δ = dot3(n, n)
-    # The closest points on `y` of the end points of `x`, the end point
-    # candidates of `dist_sqr_r_s_t`, and the closest points on `x` of the end
-    # points of `y`, its `s` at `t = 0` and `t = 1`.
+    # The closest points on `x` of the end points of `y`, and the closest
+    # points on `y` of the end points of `x`.
     s0 = clamp01nan(d/a)
     s1 = clamp01nan((b + d)/a)
     t0 = clamp01nan(-e/c)
