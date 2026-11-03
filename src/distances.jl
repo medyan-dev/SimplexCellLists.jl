@@ -226,17 +226,33 @@ the point at `t` on `y`, clamped, then `t` of the closest point on `y` of
 the point at `s` on `x`, clamped. That is a pair of points of the line
 segments, so it is not closer than the true distance, `d2` is `dot(r, r)` of
 its own separation `r`, which does not cancel, and `r` is the separation of
-the points the weights give. A reprojection never moves the points apart.
+the points the weights give.
 
-If the closest points have `s` inside `x`, the first `t` and its `s` are
-them, and the last `t` keeps them. If they only have `s` at an end of `x`,
-the first `s` is that end, and the last `t` is the closest point on `y` of
-that end. With the first `t` from the lines, this holds as the distance,
-minimized over `t` in `[0, 1]`, is convex in `s` with its minimum at the `s`
-of the lines. With the first `t` clamped, say to one, the first `s` is the
-closest point on `x` of the point at one on `y`, so a closer pair at `s = 0`
-has `t < 1`. With the first `s` above zero, that needs `b > √(a*c)` with
-`a = P⋅P`, which Cauchy-Schwarz rules out.
+Why this pair is the closest pair of the line segments:
+
+The proof uses one fact twice. Move a point along a line, and take its
+distance to a fixed line or line segment. That distance is a convex function
+of the point's position, so its minimum over `[0, 1]` is at its
+unconstrained minimizer clamped to `[0, 1]`.
+
+Step 1, the first `t`. Extend `x` and `y` to the whole lines through them,
+so `t` can be any number. The distance from the point at `t` on the line
+through `y` to the line through `x` is smallest at the `t` of the closest
+points of the two lines. The first `t` is that `t` clamped, so among `t` in
+`[0, 1]`, it gives the smallest distance to the line through `x`. Let `X1`
+be the point on the line through `x` closest to the point at the first `t`.
+Then these two points are the closest pair between `y` and the whole line
+through `x`. If the lines are parallel, the distance is the same for every
+`t`, so any first `t` works.
+
+Step 2, the first `s`. Move a point along the line through `x`, and take its
+distance to `y`. By step 1 it is smallest at `X1`. The first `s` is the `s`
+of `X1` clamped, so among `s` in `[0, 1]`, it gives the smallest distance
+to `y`.
+
+Step 3, the last `t`. It is the closest point on `y` to the point at the
+first `s`. By step 2, no point of `x` is closer to `y`, so this pair is the
+closest pair of the line segments.
 
 `t = -n⋅(P×Q0mP0)/(n⋅n)` with `n = P×Q` is a triple product over `‖n‖²`
 (Lagrange's identity), as in Kahan, "Computing Cross-Products and Rotations
@@ -257,10 +273,8 @@ two adds at most about a rounding of `‖Q‖`.
 `n⋅n` and `n⋅(P×Q0mP0)` are at most fourth powers of the coordinates, so
 they are in range. When `n⋅n` underflows, `‖P‖*‖Q‖*sinθ` is below about
 `floatmin^(1/2)`, so `y` is shorter than about `floatmin^(1/4)`, or `x` is
-within that of a line segment parallel to `y`. For parallel line segments
-any `t` will do: if the point at `t` on `y` is beside `x`, it and its `s`
-are as close as any pair, and otherwise `s` is the end of `x` toward it, and
-the last `t` is the closest point on `y` of that end. Zero length or parallel
+within that of a line segment parallel to `y`, where any first `t` will do,
+as above. Zero length or parallel
 line segments give NaN or infinite parameters, which `clamp01nan` makes
 points of the line segments.
 
