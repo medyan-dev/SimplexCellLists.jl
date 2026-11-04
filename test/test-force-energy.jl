@@ -335,5 +335,89 @@ using StaticArrays
         @test_throws MethodError get_force!(fe, zeros(SVector{3, Float64}, nbeads))
         @test_throws MethodError get_force(fe)
     end
+
+    @testset "show" begin
+        plain(x; kwargs...) = repr(MIME"text/plain"(), x; kwargs...)
+        fe = ForceEnergyFloat64(3)
+        add_bead_force!(fe, 2, SA[1.0, -2/3, 0.0])
+        add_energy!(fe, 0.5)
+        @test plain(fe) == """
+            ForceEnergyFloat64 with 3 beads:
+              energy: 0.5
+              forces:
+                1: [0.0, 0.0, 0.0]
+                2: [1.0, -0.666667, 0.0]
+                3: [0.0, 0.0, 0.0]"""
+        @test plain(ForceEnergyFloat32(0)) == """
+            ForceEnergyFloat32 with 0 beads:
+              energy: 0.0"""
+
+        # A limited display shows only the first and last beads.
+        limited = IOContext(devnull, :limit => true, :displaysize => (12, 80))
+        @test plain(ForceEnergyFloat64(1000); context=limited) == """
+            ForceEnergyFloat64 with 1000 beads:
+              energy: 0.0
+              forces:
+                   1: [0.0, 0.0, 0.0]
+                   2: [0.0, 0.0, 0.0]
+                   3: [0.0, 0.0, 0.0]
+                   ⋮
+                 999: [0.0, 0.0, 0.0]
+                1000: [0.0, 0.0, 0.0]"""
+
+        # Fixed point shows converted values, not the raw integers.
+        fx = ForceEnergyFixedPoint{30, 30}(2)
+        add_bead_force!(fx, 1, SA[0.5, 0.25, -1.0])
+        add_energy!(fx, 2.5)
+        @test plain(fx) == """
+            ForceEnergyFixedPoint{30, 30} with 2 beads:
+              energy: 2.5
+              forces:
+                1: [0.5, 0.25, -1.0]
+                2: [0.0, 0.0, 0.0]"""
+
+        nfx = ForceNoEnergyFixedPoint{30}(1)
+        add_bead_force!(nfx, 1, SA[0.5, 0.25, -1.0])
+        @test plain(nfx) == """
+            ForceNoEnergyFixedPoint{30} with 1 bead and no energy:
+              forces:
+                1: [0.5, 0.25, -1.0]"""
+        # With one header line, one more bead fits than above.
+        @test plain(ForceNoEnergyFixedPoint{30}(1000); context=limited) == """
+            ForceNoEnergyFixedPoint{30} with 1000 beads and no energy:
+              forces:
+                   1: [0.0, 0.0, 0.0]
+                   2: [0.0, 0.0, 0.0]
+                   3: [0.0, 0.0, 0.0]
+                   ⋮
+                 998: [0.0, 0.0, 0.0]
+                 999: [0.0, 0.0, 0.0]
+                1000: [0.0, 0.0, 0.0]"""
+
+        dfe = DebugForceEnergy{Rational{Int}}(2)
+        add_bead_force!(dfe, 1, SA[1//3, 0, 0])
+        add_bead_force!(dfe, 1, SA[1//3, 0, 0])
+        add_energy!(dfe, 1//7)
+        @test plain(dfe) == """
+            DebugForceEnergy{Rational{Int64}} with 2 beads:
+              1 energy contribution, 2 force contributions
+              energy: 1//7
+              forces:
+                1: [2//3, 0, 0]
+                2: [0, 0, 0]"""
+        # With three header lines, one less bead fits than above.
+        @test plain(DebugForceEnergy{Float64}(1000); context=limited) == """
+            DebugForceEnergy{Float64} with 1000 beads:
+              0 energy contributions, 0 force contributions
+              energy: 0.0
+              forces:
+                   1: [0.0, 0.0, 0.0]
+                   2: [0.0, 0.0, 0.0]
+                   ⋮
+                 999: [0.0, 0.0, 0.0]
+                1000: [0.0, 0.0, 0.0]"""
+
+        @test plain(NullForceEnergy(1)) == "NullForceEnergy with 1 bead, discarding all forces and energy"
+    end
 end
 nothing

@@ -322,5 +322,23 @@ total_entries(pcl::PointCellList) = sum(pcl.cells[i].len for i in 1:prod(pcl.siz
             end
         end
     end
+
+    @testset "show" begin
+        pcl = PointCellList{Int,Float32}((4,3,2), 0.5f0)
+        cell_point_add!(pcl, SA[0.1f0, 0.1f0, 0.1f0], 1)
+        cell_point_add!(pcl, SA[0.2f0, 0.1f0, 0.1f0], 2)
+        cell_point_add!(pcl, SA[-0.6f0, 0.1f0, 0.1f0], 3)
+        @test repr(MIME"text/plain"(), pcl) == """
+            PointCellList{Int64, Float32} with 3 points:
+              size: 4×3×2 cells
+              grid spacing: 0.5
+              most points in one cell: 2"""
+        cell_points_clear!(pcl)
+        @test repr(MIME"text/plain"(), pcl) == """
+            PointCellList{Int64, Float32} with 0 points:
+              size: 4×3×2 cells
+              grid spacing: 0.5
+              most points in one cell: 0"""
+    end
 end
 nothing

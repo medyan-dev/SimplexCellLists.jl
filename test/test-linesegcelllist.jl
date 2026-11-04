@@ -369,5 +369,22 @@ end
             end
         end
     end
+
+    @testset "show" begin
+        scl = LineSegCellList{Int,Float32}((4,4,4), 1f0)
+        # Crosses x = -1, 0, and 1, so has entries in 4 cells.
+        cell_line_seg_add!(scl, SA[-1.5f0, 0.5f0, 0.5f0], SA[1.5f0, 0.5f0, 0.5f0], 1)
+        # Inside one of those cells.
+        cell_line_seg_add!(scl, SA[0.2f0, 0.5f0, 0.5f0], SA[0.3f0, 0.5f0, 0.5f0], 2)
+        @test repr(MIME"text/plain"(), scl) == """
+            LineSegCellList{Int64, Float32} with 2 line segments:
+              size: 4×4×4 cells
+              grid spacing: 1.0
+              cell entries: 5
+              most entries in one cell: 2"""
+        cell_line_segs_clear!(scl)
+        cell_line_seg_add!(scl, SA[0.2f0, 0.5f0, 0.5f0], SA[0.3f0, 0.5f0, 0.5f0], 2)
+        @test startswith(repr(MIME"text/plain"(), scl), "LineSegCellList{Int64, Float32} with 1 line segment:\n")
+    end
 end
 nothing

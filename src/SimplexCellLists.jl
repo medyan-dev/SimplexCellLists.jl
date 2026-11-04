@@ -173,4 +173,6 @@ let NL = NeighborLists{DefaultCollidePolicy, DefaultPairParams}
     end
 end
 
+include("show.jl")
+
 end

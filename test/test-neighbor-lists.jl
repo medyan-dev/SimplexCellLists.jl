@@ -320,5 +320,62 @@ using Random
             end
         end
     end
+
+    @testset "show" begin
+        plain(x) = repr(MIME"text/plain"(), x)
+        params = DefaultObjectParams(1.0f0, UInt32(1), UInt32(0))
+        inputs = NeighborListInputs(policy;
+            points = PointIdxPart.(UInt32.(1:3)),
+            p_radius = fill(0.3f0, 3),
+            p_params = fill(params, 3),
+            skin = 0.25f0,
+        )
+        push!(inputs.no_collide_pairs[Int(CollidePoint_Point)], UInt32(1) => UInt32(3))
+        @test plain(inputs) == """
+            NeighborListInputs{DefaultCollidePolicy, DefaultObjectParams}:
+              policy: DefaultCollidePolicy(8.0)
+              points:          3
+              clines:          0
+              lines:           0
+              line_points:     0
+              triangles:       0
+              triangle_lines:  0
+              triangle_points: 0
+              no_collide_pairs: 1
+                CollidePoint_Point: 1
+              skin: 0.25
+              nthreads: 1"""
+
+        # Only the first two points are close enough to collide.
+        pos = [SA[0.0, 0.0, 0.0], SA[0.5, 0.0, 0.0], SA[10.0, 0.0, 0.0]]
+        nl = NeighborLists(policy)
+        setup_neighbors_naive!(nl, pos, inputs)
+        @test plain(nl) == """
+            NeighborLists{DefaultCollidePolicy, DefaultPairParams} with 1 edge:
+              policy: DefaultCollidePolicy(8.0)
+              PPNL point–point:    1
+              PCNL point–cline:    0
+              PLNL point–line:     0
+              PTNL point–triangle: 0
+              CCNL cline–cline:    0
+              CLNL cline–line:     0
+              LLNL line–line:      0"""
+
+        # Mismatched lengths, which setup rejects, are pointed out.
+        push!(inputs.c_radius, 1.0f0)
+        @test contains(plain(inputs), "\n  clines:          0, but 1 c_radius and 0 c_params\n")
+
+        # The count column widens to fit the largest count.
+        inputs = NeighborListInputs(policy;
+            lines = fill(LineIdxPart(UInt32(1), UInt32(2)), 12345),
+            l_radius = fill(0.3f0, 12345),
+            l_params = fill(params, 12345),
+        )
+        @test contains(plain(inputs), """
+              points:              0
+              clines:              0
+              lines:           12345
+            """)
+    end
 end
 nothing
