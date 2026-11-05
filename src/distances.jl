@@ -316,7 +316,8 @@ Between Line Segments" (Geometric Tools, 2018, revised 2023).
     t = _clamp01_div(-dot3(n, cross3(P, Q0mP0)), dot3(n, n))
     s = clamp01nan(fma(t, b, dot3(P, Q0mP0))*ia)
     t = clamp01nan(fma(s, b, -e)*ic)
-    r = fma3(-s, P, fma3(t, Q, Q0mP0))
+    # The `s` term first, so it runs beside the last `t`.
+    r = fma3(t, Q, fma3(-s, P, Q0mP0))
     dot3(r, r), r, SVector{1,T}(s), SVector{1,T}(t)
 end
 
