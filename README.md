@@ -6,7 +6,7 @@ This Julia package contains data structures and algorithms for doing computation
 
 It provides:
 
-- Cell lists for points ([`PointCellList`](src/pointcelllist.jl)) and line segments ([`LineSegCellList`](src/linesegcelllist.jl)) with fast nearby-neighbor mapping.
+- Cell lists for points ([`PointCellList`](src/pointcelllist.jl)), line segments ([`LineSegCellList`](src/linesegcelllist.jl)), and triangles ([`TriangleCellList`](src/trianglecelllist.jl)) with fast nearby-neighbor mapping.
 - Squared-distance functions ([`dist_sqr`, `dist_sqr_r_s_t`](src/distances.jl)) for all pairs of points, line segments, and triangles.
 - Neighbor list construction with two broad phases: a multi-level grid ([`setup_neighbors_grid!`](src/neighbor-lists-grid.jl)) and sort and sweep ([`setup_neighbors_sort_sweep!`](src/neighbor-lists.jl)).
 - Soft-sphere collide forces and energy ([`collide_forces!`](src/collide-forces.jl)) computed from the neighbor lists.
@@ -42,7 +42,10 @@ n = map_nearby_points(pcl, SA[0.0f0, 0.0f0, 0.0f0], 0.5f0, 0) do entry, sep, cou
 end
 ```
 
-`LineSegCellList`, `cell_line_seg_add!`, and `map_nearby_line_segs` are the line segment analogs, and `cell_points_clear!`/`cell_line_segs_clear!` reset a list for reuse.
+`LineSegCellList`, `cell_line_seg_add!`, and `map_nearby_line_segs` are the line segment analogs,
+`TriangleCellList`, `cell_triangle_add!`, and `map_nearby_triangles` are the triangle analogs,
+and `cell_points_clear!`/`cell_line_segs_clear!`/`cell_triangles_clear!` reset a list for reuse.
+Line segments and triangles that span several cells are reported once per query.
 
 ## Distances
 

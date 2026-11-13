@@ -34,6 +34,13 @@ export cell_line_seg_tmax
 export map_nearby_line_segs
 export cell_line_segs_clear!
 
+include("trianglecelllist.jl")
+export TriangleCellList
+export CellTriangleEntry
+export cell_triangle_add!
+export map_nearby_triangles
+export cell_triangles_clear!
+
 # The mapping functions are not precompiled because they must be specialized
 # on the caller's callback function anyway.
 let T = Int64, F = Float32
@@ -45,6 +52,10 @@ let T = Int64, F = Float32
     precompile(LineSegCellList{T,F}, (NTuple{3,Int}, F))
     precompile(cell_line_segs_clear!, (LineSegCellList{T,F},))
     precompile(cell_line_seg_add!, (LineSegCellList{T,F}, SVector{3,F}, SVector{3,F}, T))
+    precompile(TriangleCellList{T,F}, (SVector{3,Int}, F))
+    precompile(TriangleCellList{T,F}, (NTuple{3,Int}, F))
+    precompile(cell_triangles_clear!, (TriangleCellList{T,F},))
+    precompile(cell_triangle_add!, (TriangleCellList{T,F}, SVector{3,F}, SVector{3,F}, SVector{3,F}, T))
 end
 
 include("force-energy.jl")
