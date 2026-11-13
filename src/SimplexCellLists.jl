@@ -141,17 +141,10 @@ export setup_neighbors_grid!
 # Precompile the neighbor list builds for the default policy
 precompile(NeighborLists, (DefaultCollidePolicy,))
 let NL = NeighborLists{DefaultCollidePolicy, DefaultPairParams},
-        Inputs = NeighborListInputs{DefaultCollidePolicy, DefaultObjectParams}
-    for T in (Float32, Float64)
-        for Pos in (
-                Vector{SVector{3, T}},
-                typeof(reinterpret(SVector{3, T}, T[])),
-            )
-            precompile(setup_neighbors_sort_sweep!, (NL, Pos, Inputs))
-            precompile(setup_neighbors_naive!, (NL, Pos, Inputs))
-            precompile(setup_neighbors_grid!, (NL, Pos, Inputs))
-        end
-    end
+        Inputs = NeighborListInputs{DefaultCollidePolicy, DefaultObjectParams},
+        Pos = Vector{SVector{3, Float64}}
+    precompile(setup_neighbors_naive!, (NL, Pos, Inputs))
+    precompile(setup_neighbors_grid!, (NL, Pos, Inputs))
 end
 
 include("collide-forces.jl")
@@ -160,16 +153,10 @@ public nl_edge_forces!
 public nl_edge_force
 
 # Precompile the collide forces for the default policy
-let NL = NeighborLists{DefaultCollidePolicy, DefaultPairParams}
+let NL = NeighborLists{DefaultCollidePolicy, DefaultPairParams},
+        Pos = Vector{SVector{3, Float64}}
     for FE in (ForceEnergyFloat64, ForceEnergyFixedPoint{30, 30}, ForceNoEnergyFixedPoint{30})
-        for T in (Float32, Float64)
-            for Pos in (
-                    Vector{SVector{3, T}},
-                    typeof(reinterpret(SVector{3, T}, T[])),
-                )
-                precompile(collide_forces!, (FE, Pos, NL, Type{Float64}))
-            end
-        end
+        precompile(collide_forces!, (FE, Pos, NL, Type{Float64}))
     end
 end
 
