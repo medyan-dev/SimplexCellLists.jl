@@ -33,10 +33,6 @@ An origin-centered 3D voxel grid for spatial queries on triangles. The grid span
 Insert triangles with [`cell_triangle_add!`](@ref) and query with
 [`map_nearby_triangles`](@ref). Use [`cell_triangles_clear!`](@ref) to reset.
 
-Each triangle is stored in every cell its bounding box touches, so triangles
-much larger than `grid_spacing` take many entries, growing with the volume of
-their bounding box.
-
 Positions are not required to be within the grid bounds: parts of a triangle
 outside the grid are stored in the nearest boundary cells, and queries account
 for this. Triangles far outside the grid accumulate in boundary cells, which
@@ -83,7 +79,7 @@ end
     cell_triangle_add!(tcl::TriangleCellList{T,F}, p0::SVector{3, F}, p1::SVector{3, F}, p2::SVector{3, F}, id::T)::Nothing
 
 Insert the triangle with vertices `p0`, `p1`, and `p2` into the cell list, adding a
-[`CellTriangleEntry`](@ref) to every cell its bounding box touches. Each entry
+[`CellTriangleEntry`](@ref) to every cell its axis-aligned bounding box touches. Each entry
 records where its cell is in that range of cells, so
 [`map_nearby_triangles`](@ref) reports the triangle exactly once.
 
@@ -147,10 +143,6 @@ end
 Call `f` for every triangle in `tcl` whose closest point to `pos` is within `cutoff` distance.
 Each triangle is reported exactly once (deduplicated across cells).
 
-The distance is the `d²` of `dist_sqr_r_s_t(SA[pos], entry.tri)`, see
-[`dist_sqr_r_s_t`](@ref), which also gives the barycentric coordinates of the
-closest point, bit for bit.
-
 # Arguments
 - `f(entry::CellTriangleEntry{T,F}, sep::SVector{3,F}, out) -> (out, cont::Bool)`: callback called
   for each nearby triangle. `sep` is the separation vector from `pos` to the closest point on the
@@ -180,7 +172,7 @@ function map_nearby_triangles(
     # queries and huge cutoffs from overflowing Int.
     pos_norm = clamp.(pos * h2_inv, -F.(sz), prevfloat.(F.(sz)))
     p = round2grid(pos_norm, sz)
-    # Deduplication, like the grid neighbor lists: a triangle within the
+    # Deduplication: a triangle within the
     # cutoff is only reported from the cell of the point of its bounding box
     # closest to `pos`. Since round2grid is monotone, along each axis that is
     # the cell of `pos` clamped to the range of cells the box touches, so
