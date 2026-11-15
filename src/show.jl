@@ -33,6 +33,23 @@ function Base.show(io::IO, ::MIME"text/plain", scl::LineSegCellList)
     print(io, "\n  most entries in one cell: ", maximum(lens; init=0))
 end
 
+function Base.show(io::IO, ::MIME"text/plain", tcl::TriangleCellList)
+    lens = Iterators.map(c -> c.len, tcl.cells)
+    # Each triangle has exactly one entry in the first cell of its range
+    # along every axis.
+    ntris = sum(tcl.cells; init=0) do c
+        count(e -> e.box_ends & 0x07 == 0x07, view(c.list, 1:c.len))
+    end
+    summary(io, tcl)
+    print(io, " with ")
+    _print_count(io, ntris, "triangle", "triangles")
+    print(io, ":\n  size: ", join(tcl.size, "×"), " cells")
+    print(io, "\n  grid spacing: ")
+    show(IOContext(io, :compact => true), 2*inv(tcl.inv_half_grid_spacing))
+    print(io, "\n  cell entries: ", sum(lens; init=0))
+    print(io, "\n  most entries in one cell: ", maximum(lens; init=0))
+end
+
 # Print the forces of all beads as type `F`, one bead per line, for the
 # `text/plain` `show` of accumulators that store forces. Like printing a
 # `Vector`, a limited `io` shows only the first and last beads so the output
